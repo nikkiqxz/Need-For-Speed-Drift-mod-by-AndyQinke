@@ -1,6 +1,9 @@
 // MW Drift Controller by AndyQinke - ASI for Need for Speed Most Wanted (2005)
 // 内存地址按“首选映像基址”换算：实际指针 = VA - ImageBase + GetModuleHandle(nullptr)
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
@@ -39,7 +42,7 @@ uintptr_t g_vaMinSlipRad = 0x008ABB78;
 uintptr_t g_vaFrictionScale = 0x00891050;
 uintptr_t g_vaMaxSteerAngle = 0x008AADE8;
 uintptr_t g_vaSteeringScale = 0x008AB22C;
-uintptr_t g_vaBodyYaw = 0x009386D0;
+uintptr_t g_vaBodyYaw = 0x009386CC;
 
 std::unordered_map<std::string, std::string> g_ini;
 std::wstring g_iniPath;
@@ -119,8 +122,9 @@ int IniInt(const std::string& key, int def) {
 bool IniBool(const std::string& key, bool def) {
   const std::string* s = IniGet(key);
   if (!s || s->empty()) return def;
-  if (*s == '1' || *s == 'y' || *s == 'Y' || *s == 't' || *s == 'T') return true;
-  if (*s == '0' || *s == 'n' || *s == 'N' || *s == 'f' || *s == 'F') return false;
+  const char c = (*s)[0];
+  if (c == '1' || c == 'y' || c == 'Y' || c == 't' || c == 'T') return true;
+  if (c == '0' || c == 'n' || c == 'N' || c == 'f' || c == 'F') return false;
   return def;
 }
 
@@ -205,7 +209,9 @@ void WritePhysics(float driftBase, float slipRad, float friction, float maxSteer
   *F(g_vaFrictionScale) = friction;
   *F(g_vaMaxSteerAngle) = maxSteer;
   *F(g_vaSteeringScale) = steerScale;
-  *F(g_vaBodyYaw) = yaw;
+  // 车身 Y 旋转：按你的要求暂时关闭写入（避免误改该地址）；恢复功能时取消下行注释并删掉 (void)yaw
+  (void)yaw;
+  // *F(g_vaBodyYaw) = yaw;
 }
 
 // 仅功能2会改写的量；从功能1首次进入功能2时快照，退出功能2回到功能1时写回
@@ -568,7 +574,9 @@ DWORD WINAPI ThreadMain(LPVOID) {
         else s.dr = 0;
         const bool combo5 = (s.dl >= static_cast<double>(comboCfg5Sec) || s.dr >= static_cast<double>(comboCfg5Sec));
 
+        // 与 2026-04-21 14:00 前一致：sgn = 左且非右为 -1，否则为 1；若正在输入左方向键，则对读入的轨道角幅度再 * -1（0x89095C）
         float mag = ReadOrbital(combo5 ? 5 : s.tier, 0.f);
+        if (L) mag *= -1.f;
         const float sgn = (L && !R) ? -1.f : 1.f;
         s.lastSign = sgn;
         *F(g_vaFrontSteer) = mag * sgn;

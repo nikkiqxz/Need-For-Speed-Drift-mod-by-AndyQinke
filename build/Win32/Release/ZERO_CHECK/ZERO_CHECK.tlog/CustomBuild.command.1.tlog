@@ -1,0 +1,10 @@
+^C:\USERS\WEPIE\RACGAME\BUILD\CMAKEFILES\1C23914F0C859C135660812855059A83\GENERATE.STAMP.RULE
+setlocal
+"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -SC:/Users/wepie/RACGame -BC:/Users/wepie/RACGame/build --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file C:/Users/wepie/RACGame/build/MWDriftController.sln
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
