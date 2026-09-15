@@ -1,0 +1,22 @@
+Slippery Drifting FlashFish by AndyQinke 1.3.8 RELEASE
+
+Build target: Windows PE32 / x86
+Configuration: Release, project C++ /W4 /WX
+Vehicle countersteer registry capacity: 512
+Configured countersteer vehicle entries: 130
+Configured rear-wheel-steering vehicle entries: 4
+Test suite: 13/13 passed
+Rear-wheel steering: enabled, current vehicle database name matching
+Visual ownership: current vehicle key accepted at any collection-chain depth
+Performance-part nodes: visual traversal only, never vehicle identity
+RWS phase boundary: <70 km/h opposite, >=70 km/h same
+RWS high-speed cutoff: disabled
+RWS actuator rate: 20 deg/s at <=30 km/h, linear to 10 deg/s at >=120 km/h
+RWS force trace: disabled
+RWS diagnostic logging: disabled
+HUD diagnostic logging: disabled
+Runtime logging: disabled
+
+SHA-256:
+8A057114CE144E4EA65412D9253480843E6EDBE5F8B3D2FD52282C0C45C100A7  Slippery_Drifting_FlashFish_by_AndyQinke.asi
+DFF0B570753CCAF2FA8CE3C5FF8312964E6D61DE12B4E2010826073147B77734  drift_assist.ini

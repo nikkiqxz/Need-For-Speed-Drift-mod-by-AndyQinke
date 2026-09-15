@@ -1,1 +1,17 @@
 RACGame.rar
+
+# Local build output
+build-current/
+cmake-build-*/
+out/
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+
+# Runtime and diagnostic output
+*.log
+*.rws.log
+*.hud.log
+Slippery_Drifting_FlashFish_by_AndyQinke.binding.json
