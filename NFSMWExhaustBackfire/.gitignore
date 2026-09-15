@@ -1,0 +1,14 @@
+# Local build output
+build*/
+cmake-build-*/
+out/
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+
+# Runtime and diagnostic output
+*.log
+*.device.json
+
