@@ -41,7 +41,7 @@ ZMenu 确实还包含与漂移模式相互独立的运行时属性编辑能力�
 
 ### 非 ZMenu 的本地对照实现
 
-研究时另有一个本地 `DriftMode.asi` 样本，SHA-256 为 `37F21CBB91A6EBECFA5BD93B9CAD51E03FD562C5DAA9DE3A1F2E48191CEAFF1A`。它是一个带 COFF/DWARF 调试符号的独立 32 位 MinGW 插件，编译单元名为 `DriftMode.cpp`；没有证据表明它属于 ZMenu，以下内容只能作为同类实现的对照，不能当作 ZMenu 结论。
+本机另有 `C:\Users\wepie\Downloads\DriftMode.asi`，SHA-256 为 `37F21CBB91A6EBECFA5BD93B9CAD51E03FD562C5DAA9DE3A1F2E48191CEAFF1A`。它是一个带 COFF/DWARF 调试符号的独立 32 位 MinGW 插件，编译单元名为 `DriftMode.cpp`；没有证据表明它属于 ZMenu，以下内容只能作为同类实现的对照，不能当作 ZMenu 结论。
 
 该插件保留的符号、字符串和反汇编共同证明：
 

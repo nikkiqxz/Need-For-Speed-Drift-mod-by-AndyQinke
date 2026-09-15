@@ -97,10 +97,10 @@ cmake --version
 复制并执行：
 
 ```powershell
-$repoRoot = 'D:\path\to\Need-For-Speed-Drift-mod-by-AndyQinke'
-$src = "$repoRoot\source\nfsmw_drift_assist"
-$sdk = "$repoRoot\external\nfsmw-2005-sdk"
-$script = "$repoRoot\work\configure_build_v099_x86.cmd"
+$taskRoot = 'C:\Users\wepie\Documents\Codex\2026-08-31\za'
+$src = "$taskRoot\outputs\nfsmw_drift_assist"
+$sdk = "$taskRoot\work\external\nfsmw-2005-sdk"
+$script = "$taskRoot\work\configure_build_v099_x86.cmd"
 Test-Path "$src\CMakeLists.txt"
 Test-Path "$sdk\CMakeLists.txt"
 Test-Path $script
@@ -137,12 +137,12 @@ Get-ChildItem "$coreBuild\nfsmw_drift_assist_tests.exe", `
 预期文件在：
 
 ```text
-<仓库根目录>\work\core_v099_tests_x86\nfsmw_drift_assist_tests.exe
-<仓库根目录>\work\core_v099_tests_x86\nfsmw_drift_requirements_tests.exe
-<仓库根目录>\work\core_v099_tests_x86\nfsmw_drift_camera_tests.exe
-<仓库根目录>\work\core_v099_tests_x86\nfsmw_drift_steering_response_tests.exe
-<仓库根目录>\work\functional_alpha_v099_x86\nfsmw_drift_assist_asi.dll
-<仓库根目录>\work\functional_alpha_v099_x86\nfsmw_drift_assist_alpha.asi
+C:\Users\wepie\Documents\Codex\2026-08-31\za\work\core_v099_tests_x86\nfsmw_drift_assist_tests.exe
+C:\Users\wepie\Documents\Codex\2026-08-31\za\work\core_v099_tests_x86\nfsmw_drift_requirements_tests.exe
+C:\Users\wepie\Documents\Codex\2026-08-31\za\work\core_v099_tests_x86\nfsmw_drift_camera_tests.exe
+C:\Users\wepie\Documents\Codex\2026-08-31\za\work\core_v099_tests_x86\nfsmw_drift_steering_response_tests.exe
+C:\Users\wepie\Documents\Codex\2026-08-31\za\work\functional_alpha_v099_x86\nfsmw_drift_assist_asi.dll
+C:\Users\wepie\Documents\Codex\2026-08-31\za\work\functional_alpha_v099_x86\nfsmw_drift_assist_alpha.asi
 ```
 
 前四个文件是测试程序，不能放进游戏；最后一个 `nfsmw_drift_assist_alpha.asi` 才是
@@ -169,7 +169,7 @@ dumpbin /headers "$asiBuild\nfsmw_drift_assist_alpha.asi" | Select-String 'machi
 执行过 `vcvarsall.bat x86` 的终端中逐行执行：
 
 ```powershell
-$asiBuild = "$repoRoot\work\functional_alpha_v099_x86_manual"
+$asiBuild = 'C:\Users\wepie\Documents\Codex\2026-08-31\za\work\functional_alpha_v099_x86_manual'
 cmake -S $src -B $asiBuild -G 'NMake Makefiles' -DCMAKE_BUILD_TYPE=Release `
   -DBUILD_TESTING=OFF -DNFSMW_BUILD_ASI_HOST=ON `
   -DNFSMW_ENABLE_ALPHA_BRIDGE=ON `
@@ -234,7 +234,7 @@ Alpha 0.9.13 功能构建。若省略这些选项，
 在 Developer PowerShell 中执行：
 
 ```powershell
-$diagBuild = "$repoRoot\work\input_diagnostic_x86"
+$diagBuild = 'C:\Users\wepie\Documents\Codex\2026-08-31\za\work\input_diagnostic_x86'
 cmake -S $src -B $diagBuild -G 'NMake Makefiles' -DCMAKE_BUILD_TYPE=Release `
   -DBUILD_TESTING=OFF -DNFSMW_BUILD_ASI_HOST=ON `
   -DNFSMW_ENABLE_INPUT_DIAGNOSTIC=ON `
@@ -268,7 +268,7 @@ A1 7C 3E 91 00 56 8B 35 74 3E 91 00 8D 0C 86 3B F1 57 8B 7C 24
 在同一个 Developer PowerShell 中执行：
 
 ```powershell
-$vehicleBuild = "$repoRoot\work\vehicle_diagnostic_x86"
+$vehicleBuild = 'C:\Users\wepie\Documents\Codex\2026-08-31\za\work\vehicle_diagnostic_x86'
 cmake -S $src -B $vehicleBuild -G 'NMake Makefiles' -DCMAKE_BUILD_TYPE=Release `
   -DBUILD_TESTING=OFF -DNFSMW_BUILD_ASI_HOST=ON `
   -DNFSMW_ENABLE_VEHICLE_DIAGNOSTIC=ON `
@@ -303,7 +303,7 @@ cmake --build $vehicleBuild --target nfsmw_drift_assist_asi
 在同一个 Developer PowerShell 中执行：
 
 ```powershell
-$coordinatorBuild = "$repoRoot\work\coordinator_diagnostic_x86"
+$coordinatorBuild = 'C:\Users\wepie\Documents\Codex\2026-08-31\za\work\coordinator_diagnostic_x86'
 cmake -S $src -B $coordinatorBuild -G 'NMake Makefiles' -DCMAKE_BUILD_TYPE=Release `
   -DBUILD_TESTING=OFF -DNFSMW_BUILD_ASI_HOST=ON `
   -DNFSMW_ENABLE_COORDINATOR_DIAGNOSTIC=ON `
@@ -345,7 +345,7 @@ A1 7C 3E 91 00 56 8B 35 74 3E 91 00 8D 0C 86 3B F1 57 8B 7C 24
 在新的构建目录中执行：
 
 ```powershell
-$phaseBuild = "$repoRoot\work\phase_timing_diagnostic_x86"
+$phaseBuild = 'C:\Users\wepie\Documents\Codex\2026-08-31\za\work\phase_timing_diagnostic_x86'
 cmake -S $src -B $phaseBuild -G 'NMake Makefiles' -DCMAKE_BUILD_TYPE=Release `
   -DBUILD_TESTING=OFF -DNFSMW_BUILD_ASI_HOST=ON `
   -DNFSMW_ENABLE_PHASE_DIAGNOSTIC=ON `
@@ -481,8 +481,8 @@ slot 39，RVA `0x00299E10`），通过 `deltaV = targetAcceleration * dt` 给整
 在 Visual Studio Developer PowerShell 中执行：
 
 ```powershell
-$src = "$repoRoot\source\nfsmw_drift_assist"
-$coreBuild = "$repoRoot\work\core_v099_tests_x86"
+$src = 'C:\Users\wepie\Documents\Codex\2026-08-31\za\outputs\nfsmw_drift_assist'
+$coreBuild = 'C:\Users\wepie\Documents\Codex\2026-08-31\za\work\core_v099_tests_x86'
 cmake -S $src -B $coreBuild -G 'NMake Makefiles' -DCMAKE_BUILD_TYPE=Release `
   -DBUILD_TESTING=ON -DNFSMW_BUILD_ASI_HOST=OFF
 cmake --build $coreBuild
