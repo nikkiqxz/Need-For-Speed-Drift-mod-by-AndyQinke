@@ -140,6 +140,8 @@ private:
     AudioBank audioBank_;
     std::mt19937 rng_;
     std::unordered_map<VehicleId, VehicleState> states_;
+    std::vector<VehicleSnapshot> snapshotBuffer_;
+    std::vector<VehicleId> observedBuffer_;
 };
 
 }  // namespace nfsmw_exhaust

@@ -278,5 +278,5 @@ NFSW_Exhaust_Shutdown() {
 
 extern "C" NFSW_EXHAUST_EXPORT const char* NFSW_EXHAUST_CALL
 NFSW_Exhaust_Version() {
-    return "1.1.14";
+    return "1.1.15";
 }

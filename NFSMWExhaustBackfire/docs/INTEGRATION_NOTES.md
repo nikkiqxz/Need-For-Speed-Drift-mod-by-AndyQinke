@@ -74,14 +74,14 @@ own vehicle-destruction hook.
 
 The supplied target is the verified Reforged-C5C5-868086 image documented in
 `TARGET_PROFILE.md`. The 64-byte Reforged footer changes the file fingerprint
-but not the executable code or virtual-address layout. Release v1.1.14 accepts
+but not the executable code or virtual-address layout. Release v1.1.15 accepts
 only `speed.exe`, validates the complete MD5 and SHA-256, parses the 64-byte
 `NFSMWRF1` footer and verification code `868086`, verifies its original-image
 digest, and then applies the PE-header and entry-signature gates.
 The generic SDK entry is still not used because it does not perform this full
 target validation.
 
-Release v1.1.14 then performs a separate fail-closed device-binding gate before
+Release v1.1.15 then performs a separate fail-closed device-binding gate before
 registering the core or installing hooks. It requires the SMBIOS System UUID,
 Windows `MachineGuid`, and system-volume serial, hashes all three in a
 product-specific domain, and protects the deterministic binding payload with
@@ -109,7 +109,7 @@ It must fail closed and leave the stock game untouched when any check fails.
 Do not call the particle/audio addresses above until their calling conventions
 and request structures have been verified in the target process.
 
-Release v1.1.14 hooks `GameFrameTick @ 0x00663D30` with MinHook after
+Release v1.1.15 hooks `GameFrameTick @ 0x00663D30` with MinHook after
 validating its first 16 bytes. The detour calls the original first, then runs
 `NFSW_Exhaust_OnFrame(GetTickCount64())` on the game thread. It reads
 `IEngine*` and `ITransmission*` from `PVehicle + 0xF4` and `PVehicle + 0xFC`,
@@ -146,10 +146,19 @@ The constructor initializes the Engine and Transmission fields at `+0xF4` and
 `+0xFC`. Diagnostic v0.2.2 proved that the table entries have the expected
 main vtable, while also proving that the older `+0x60/+0x68` interpretation
 belonged to a different vehicle-related class constructed at `0x006B45C0`.
-Version 1.1.14 accepts only the direct `PVehicle` view and requires
+Version 1.1.15 accepts only the direct `PVehicle` view and requires
 exact vtables `0x008AB6E0` and `0x008AB720` before calling any getter. Failed
 slot-zero probes are logged at most once per second with all relevant pointers
 and vtables.
+
+The native v1.1.15 adapter intentionally reads slot zero only. It keeps one
+vehicle state and one render connection, and lazily rebuilds that mapping when
+the player changes cars or a race loads. Other table slots are AI vehicles:
+they never enter the trigger core, audio backend, pulse service, SunSet light
+integration, NOS edge tracking, or stock-backfire suppression. Global emitter
+hooks therefore forward AI calls unchanged after a constant-size player-record
+lookup. The generic C callback API remains multi-vehicle capable for external
+adapters.
 
 The engine getter mapping is likewise validated from the vtable at
 `0x008AB6E0`: `0x006A03A0` is `GetRPM`, `0x006A03D0` is `GetRedline`, and
@@ -167,14 +176,14 @@ pointers previously mapped from `+0x3E4`. Runtime logs correlate
 the next exhaust update starts the same continuous effect on every left/right
 emitter. Event 0 sets the one-shot exhaust flag in the same handler.
 
-Version 1.1.14 suppresses events 0, 3, and 4 only for a cached vehicle owned by
+Version 1.1.15 suppresses events 0, 3, and 4 only for a cached vehicle owned by
 the plugin after both exhaust markers have been validated. It also guards the
 stock one-shot entry against a separate call for that managed connection. It
 does not change particle pools, global FX flags, or the independent NOS list.
 
 Archie's SunSet derives its stock exhaust lighting from bit `0x10` at
 `CarRenderConn + 0x3F8` and a non-zero value at `CarRenderConn + 0x3D8`, not
-from emitted particles. Version 1.1.14 no longer writes either field. For the
+from emitted particles. Version 1.1.15 no longer writes either field. For the
 installed SunSet 1.15.2 image (timestamp `0x6A4A2A2E`, image size `0x41000`),
 it validates the internal car-light collector at RVA `0xB410` and its call
 site before installing an optional hook. After SunSet has populated its own
@@ -205,7 +214,7 @@ void __thiscall EmitOneShot(
     const void* velocity);         // stock path uses CarRenderConn + 0x38
 ```
 
-Version 1.1.14 keeps the one-shot hook only for stock suppression and
+Version 1.1.15 keeps the one-shot hook only for stock suppression and
 diagnostics. Plugin flames use the proven continuous emitter entry at
 `0x00744A50`, with the effect key read from attribute `0x60CEC115`, parent
 matrix at `CarRenderConn + 0x330`, parameter bits `0x3C088889`, intensity
@@ -294,7 +303,7 @@ downshift while coasting remains eligible.
 The legacy 4-8/2-4 burst scheduler remains available only when
 `paired_shift_mode=false`.
 
-The native v1.1.14 adapter preserves that side-level behavior for cars with
+The native v1.1.15 adapter preserves that side-level behavior for cars with
 fewer than four mapped exhaust outlets. With four or more outlets, a
 simultaneous pair starts one randomly selected outlet on each side immediately
 and starts every remaining outlet 300 ms later. A sequential pair shuffles the

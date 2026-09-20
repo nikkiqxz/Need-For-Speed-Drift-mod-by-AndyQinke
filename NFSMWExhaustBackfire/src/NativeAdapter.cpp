@@ -66,8 +66,10 @@ constexpr std::size_t kEngineOffset = 0xF4u;
 constexpr std::size_t kInputOffset = 0xE8u;
 constexpr std::size_t kTransmissionOffset = 0xFCu;
 constexpr std::size_t kRenderableOffset = 0x108u;
-constexpr std::size_t kMaxVehicleSlots = 128u;
-constexpr std::size_t kMaxConnections = 128u;
+// Slot zero in the verified PVehicle table is the local player's vehicle.
+// Ignore every other slot so AI cars stay entirely on the stock exhaust path.
+constexpr std::size_t kTrackedVehicleSlots = 1u;
+constexpr std::size_t kTrackedConnections = 1u;
 constexpr std::size_t kMaxExhaustMarkers = 16u;
 constexpr std::size_t kMaxNitrousEmitters = 16u;
 constexpr std::uint64_t kStatusLogIntervalMs = 1000u;
@@ -245,9 +247,9 @@ struct ResolvedVehicle {
     void* transmission = nullptr;
 };
 
-std::array<VehicleRecord, kMaxVehicleSlots> g_records{};
-std::array<CachedVehicle, kMaxVehicleSlots> g_cached{};
-std::array<ConnectionRecord, kMaxConnections> g_connections{};
+std::array<VehicleRecord, kTrackedVehicleSlots> g_records{};
+std::array<CachedVehicle, kTrackedVehicleSlots> g_cached{};
+std::array<ConnectionRecord, kTrackedConnections> g_connections{};
 std::uint32_t g_cachedCount = 0;
 std::uint32_t g_nextVehicleId = 1;
 std::uint32_t g_connectionGeneration = 0;
@@ -635,6 +637,7 @@ bool probePVehicle(void* raw, VehicleProbe* probe) noexcept {
                  probe->renderableFunctions.data(),
                  sizeof(probe->renderableFunctions));
     }
+#if NFSMW_EXHAUST_ENABLE_LOGGING
     if (probe->renderable != nullptr &&
         reinterpret_cast<std::uintptr_t>(probe->renderable) >= 0x4Cu) {
         probe->renderableOwner = reinterpret_cast<void*>(
@@ -645,6 +648,7 @@ bool probePVehicle(void* raw, VehicleProbe* probe) noexcept {
                      sizeof(probe->renderableOwnerWords));
     }
     probeMarkers(probe);
+#endif
 
     return probe->pvehicleVtable == kPVehicleVtable &&
            probe->engineVtable == kEngineVtable &&
@@ -698,6 +702,50 @@ void populateExhaustMarkers(const VehicleProbe& probe,
 const ConnectionRecord* findConnection(void* connection) noexcept;
 bool connectionOwnsEmitter(const ConnectionRecord& record,
                            void* emitter) noexcept;
+void traceExhaustMapping(void* connection, void* renderInfo) noexcept;
+
+void* currentPlayerConnection() noexcept {
+    VehicleTableEntry entry{};
+    if (!safeRead(reinterpret_cast<const void*>(kVehicleTable), &entry,
+                  sizeof(entry)) ||
+        entry.vehicle == nullptr) {
+        return nullptr;
+    }
+
+    void* renderable = nullptr;
+    std::uintptr_t renderableVtable = 0;
+    void* connection = nullptr;
+    if (!readValue(entry.vehicle, kRenderableOffset, &renderable) ||
+        !safeRead(renderable, &renderableVtable, sizeof(renderableVtable)) ||
+        renderableVtable != kRenderableVtable ||
+        !readValue(renderable, 0x38u, &connection)) {
+        return nullptr;
+    }
+    return connection;
+}
+
+void synchronizePlayerConnection(void* playerConnection) noexcept {
+    for (auto& record : g_connections) {
+        if (record.connection != nullptr &&
+            record.connection != playerConnection) {
+            record = {};
+        }
+    }
+    if (playerConnection == nullptr ||
+        findConnection(playerConnection) != nullptr) {
+        return;
+    }
+
+    std::uintptr_t vtable = 0;
+    void* renderInfo = nullptr;
+    if (!safeRead(playerConnection, &vtable, sizeof(vtable)) ||
+        vtable != kCarRenderConnVtable ||
+        !readValue(playerConnection, 0x44u, &renderInfo) ||
+        renderInfo == nullptr) {
+        return;
+    }
+    traceExhaustMapping(playerConnection, renderInfo);
+}
 
 void logVehicleResolveFailure(
     std::size_t index, const VehicleProbe& probe,
@@ -722,7 +770,7 @@ void scanVehicles(std::uint64_t nowMs) noexcept {
     for (auto& record : g_records) record.seen = false;
     g_cachedCount = 0;
 
-    for (std::size_t index = 0; index < kMaxVehicleSlots; ++index) {
+    for (std::size_t index = 0; index < kTrackedVehicleSlots; ++index) {
         VehicleTableEntry entry{};
         const auto address = reinterpret_cast<const void*>(
             kVehicleTable + index * sizeof(VehicleTableEntry));
@@ -758,10 +806,12 @@ void scanVehicles(std::uint64_t nowMs) noexcept {
         VehicleRecord* record = recordFor(vehicle.pvehicle);
         if (record == nullptr || g_cachedCount >= g_cached.size()) break;
         record->seen = true;
+#if NFSMW_EXHAUST_ENABLE_LOGGING
         if (!record->layoutLogged) {
             logRenderableOwnerWords(record->id, probe);
             record->layoutLogged = true;
         }
+#endif
         CachedVehicle& cached = g_cached[g_cachedCount++];
         cached = {};
         cached.pointer = vehicle.pvehicle;
@@ -799,10 +849,10 @@ void scanVehicles(std::uint64_t nowMs) noexcept {
                     snapshot.rpm >= snapshot.maxRpm * 0.995f
                 ? 1
                 : 0;
-        populateExhaustMarkers(probe, &snapshot);
         void* connection = nullptr;
         const ConnectionRecord* connectionRecord = nullptr;
         if (readValue(probe.renderable, 0x38u, &connection)) {
+            synchronizePlayerConnection(connection);
             connectionRecord = findConnection(connection);
             if (connectionRecord != nullptr) {
                 snapshot.nitrousActive =
@@ -813,10 +863,12 @@ void scanVehicles(std::uint64_t nowMs) noexcept {
                         : 0;
                 }
         }
+        populateExhaustMarkers(probe, &snapshot);
         if (connectionRecord != nullptr) {
             cached.connection = connection;
         }
 
+#if NFSMW_EXHAUST_ENABLE_LOGGING
         const bool event = snapshot.shiftEvent != 0 || snapshot.gearChanged != 0;
         if (event || record->lastLogMs == 0 ||
             nowMs - record->lastLogMs >= kStatusLogIntervalMs) {
@@ -879,6 +931,7 @@ void scanVehicles(std::uint64_t nowMs) noexcept {
                   static_cast<double>(snapshot.rightExhaust.z));
             record->lastLogMs = nowMs;
         }
+#endif
         record->previousGear = snapshot.gear;
         record->previousGearValid = true;
         record->previousShift = shifting;
@@ -890,6 +943,7 @@ void scanVehicles(std::uint64_t nowMs) noexcept {
             record = {};
         }
     }
+    if (g_cachedCount == 0) synchronizePlayerConnection(nullptr);
 }
 
 std::uint32_t NFSW_EXHAUST_CALL getVehicleCount(void*) {
@@ -1784,6 +1838,9 @@ ConnectionRecord* findNitrousEmitterOwner(void* emitter) noexcept {
 void __fastcall carRenderConnOnLoadedHook(void* connection, void*,
                                           void* renderInfo) {
     g_originalCarRenderConnOnLoaded(connection, renderInfo);
+    if (connection == nullptr || connection != currentPlayerConnection()) {
+        return;
+    }
     std::uintptr_t connectionVtable = 0;
     void* storedRenderInfo = nullptr;
     void* exhaustFirst = nullptr;

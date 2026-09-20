@@ -34,28 +34,29 @@ ExhaustController::~ExhaustController() {
 void ExhaustController::tick(std::uint64_t nowMs) {
     const std::size_t capacity =
         std::max<std::size_t>(1u, config_.maxTrackedVehicles);
-    std::vector<VehicleSnapshot> snapshots(capacity);
-    std::size_t count = bridge_.collectVehicles(snapshots.data(), capacity);
+    if (snapshotBuffer_.size() != capacity) snapshotBuffer_.resize(capacity);
+    std::size_t count =
+        bridge_.collectVehicles(snapshotBuffer_.data(), capacity);
     if (count > capacity) count = capacity;
-    tick(snapshots.data(), count, nowMs);
+    tick(snapshotBuffer_.data(), count, nowMs);
 }
 
 void ExhaustController::tick(const VehicleSnapshot* snapshots,
                              std::size_t count, std::uint64_t nowMs) {
     if (snapshots == nullptr && count != 0) return;
 
-    std::vector<VehicleId> observed;
-    observed.reserve(count);
+    observedBuffer_.clear();
+    observedBuffer_.reserve(count);
     for (std::size_t i = 0; i < count; ++i) {
         if (!snapshots[i].valid || snapshots[i].id == 0) continue;
-        if (std::find(observed.begin(), observed.end(), snapshots[i].id) !=
-            observed.end()) {
+        if (std::find(observedBuffer_.begin(), observedBuffer_.end(),
+                      snapshots[i].id) != observedBuffer_.end()) {
             continue;
         }
-        observed.push_back(snapshots[i].id);
+        observedBuffer_.push_back(snapshots[i].id);
         processVehicle(snapshots[i], nowMs);
     }
-    expireMissingVehicles(observed.data(), observed.size());
+    expireMissingVehicles(observedBuffer_.data(), observedBuffer_.size());
 }
 
 void ExhaustController::reset() {
