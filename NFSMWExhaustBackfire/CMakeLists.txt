@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(NFSMWExhaustBackfire VERSION 1.1.15 LANGUAGES C CXX)
+project(NFSMWExhaustBackfire VERSION 1.1.16 LANGUAGES C CXX)
 
 if(MSVC)
     # The ASI is injected into a 2005 process; keep the package independent

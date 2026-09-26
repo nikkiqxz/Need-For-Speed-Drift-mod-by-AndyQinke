@@ -219,7 +219,7 @@ diagnostics. Plugin flames use the proven continuous emitter entry at
 `0x00744A50`, with the effect key read from attribute `0x60CEC115`, parent
 matrix at `CarRenderConn + 0x330`, parameter bits `0x3C088889`, intensity
 `1.0f`, and velocity pointer from `CarRenderConn + 0x38`. The first call arms
-a 550 ms pulse and the frame hook services it until expiry. A missing key,
+a 770 ms pulse and the frame hook services it until expiry. A missing key,
 matrix, velocity pointer, emitter ownership match, or either required marker
 rejects the flame, and its paired exhaust audio is not played.
 
@@ -264,10 +264,10 @@ has no exhaust-flame dependency. The native
 backend applies 0.999306 base gain (20% below v1.1.11), narrowed
 vehicle-relative pan with direct
 crossfeed, distance attenuation for non-listener vehicles, and mild distance
-low-pass filtering. Version 1.1.11 converts the supplied 8-channel assets to
-centered mono PCM with 14 dB of headroom plus 10 ms equal-power fade-in and
+low-pass filtering. Version 1.1.16 converts the supplied stereo assets to
+centered mono PCM with a -14 dBFS peak target plus 10 ms equal-power fade-in and
 120 ms equal-power fade-out, keeps the dry signal on the direct
-positional path, and sends a second copy through an audible 0.95-second XAudio2
+positional path, and sends a second copy through an audible 1.20-second XAudio2
 reverb bus created at the mastering voice's actual device sample rate. The wet bus is
 weighted toward rear and side channels on quad, 5.1, and 7.1 outputs; direct
 dry duplication to those channels was removed. The manifest
@@ -326,7 +326,7 @@ paired audio with equal probability in the shipped configuration.
    leaves NOS unchanged.
 4. Capture several shifts and verify each decision is exactly one of
    `SIMULTANEOUS`, `SEQUENTIAL`, or `NONE`; accepted flame logs must use
-   `mode=PULSE duration=550ms`, and every accepted side must have one audio log.
+   `mode=PULSE duration=770ms`, and every accepted side must have one audio log.
 5. Hold the engine at the limit for one second without shifting and verify the
    fixed 20% sustained attempts stop as soon as RPM leaves the threshold.
 6. Use NOS normally and verify only its real emitter START and END edges can

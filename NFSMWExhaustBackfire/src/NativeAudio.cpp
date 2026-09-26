@@ -21,7 +21,7 @@ constexpr std::size_t kClipCount = 12;
 constexpr std::size_t kVoiceCount = 32;
 constexpr std::uint64_t kMaxWaveBytes = 16u * 1024u * 1024u;
 constexpr float kBaseGain = 0.999306f;
-constexpr float kReverbGain = 0.52f;
+constexpr float kReverbGain = 0.64f;
 constexpr float kDirectPanScale = 0.70f;
 constexpr float kWetPanScale = 0.18f;
 constexpr float kTonePitchRatio = 0.86f;
@@ -321,15 +321,15 @@ bool initializeReverb(UINT32 sampleRate) noexcept {
     XAUDIO2FX_REVERB_I3DL2_PARAMETERS preset =
         XAUDIO2FX_I3DL2_PRESET_ALLEY;
     preset.WetDryMix = 100.0f;
-    preset.Room = -1300;
-    preset.RoomHF = -2300;
-    preset.DecayTime = 0.95f;
-    preset.Reflections = -500;
-    preset.ReflectionsDelay = 0.015f;
-    preset.Reverb = -850;
-    preset.ReverbDelay = 0.025f;
-    preset.Diffusion = 68.0f;
-    preset.Density = 75.0f;
+    preset.Room = -1100;
+    preset.RoomHF = -1900;
+    preset.DecayTime = 1.20f;
+    preset.Reflections = -300;
+    preset.ReflectionsDelay = 0.028f;
+    preset.Reverb = -550;
+    preset.ReverbDelay = 0.055f;
+    preset.Diffusion = 64.0f;
+    preset.Density = 72.0f;
     XAUDIO2FX_REVERB_PARAMETERS parameters{};
     ReverbConvertI3DL2ToNative(&preset, &parameters);
     if (FAILED(g_reverbVoice->SetEffectParameters(
@@ -423,7 +423,7 @@ bool initialize(const char* modulePath) noexcept {
     native_log::write(
         "AUDIO_INIT_OK backend=XAudio2 clips=%u voices=%u "
         "format=%uHz/%ubit/%uch outputChannels=%u spatial=1 volume=%.5f "
-        "directPanScale=%.2f reverb=%d reverbGain=%.2f preset=TRACK_SHORT "
+        "directPanScale=%.2f reverb=%d reverbGain=%.2f preset=TRACK_ECHO "
         "tone=pitch%.2f/bass%.2f@%.0fHz/metal%.0fHz+%.1fdB/Q%.1f/"
         "ring%.0fHz+%.1fdB/Q%.1f/trim%.2f/lowpass%.2f",
         static_cast<unsigned>(g_clips.size()),

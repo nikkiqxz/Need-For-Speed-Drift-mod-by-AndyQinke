@@ -48,7 +48,7 @@ constexpr std::uint32_t kLeftExhaustHash = 0xBCF8A18Bu;
 constexpr std::uint32_t kRightExhaustHash = 0xBD7CF15Eu;
 constexpr std::uint32_t kContinuousBackfireEffectAttributeHash = 0x60CEC115u;
 constexpr std::uint32_t kEmitterTimeStepBits = 0x3C088889u;
-constexpr std::uint64_t kPluginFlamePulseMs = 550u;
+constexpr std::uint64_t kPluginFlamePulseMs = 770u;
 constexpr std::uint64_t kMultiOutletStepMs = 300u;
 constexpr float kPluginFlameIntensity = 1.0f;
 
