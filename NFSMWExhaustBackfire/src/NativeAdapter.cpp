@@ -58,8 +58,8 @@ constexpr std::uintptr_t kGetPositionMarker = 0x005016D0u;
 constexpr std::uint32_t kLeftExhaustHash = 0xBCF8A18Bu;
 constexpr std::uint32_t kRightExhaustHash = 0xBD7CF15Eu;
 constexpr std::uint32_t kContinuousBackfireEffectAttributeHash = 0x60CEC115u;
-// bStringHash("fxcar_backfire_smoke_soft_v4"), installed by the bundled NFSMS.
-constexpr std::uint32_t kPluginSmokeEffectKey = 0xBA35EE7Eu;
+// bStringHash("fxcar_backfire_smoke_soft_v5"), installed by the bundled NFSMS.
+constexpr std::uint32_t kPluginSmokeEffectKey = 0x48433017u;
 constexpr std::uint32_t kEmitterTimeStepBits = 0x3C088889u;
 constexpr std::uint64_t kPluginFlamePulseMs = 770u;
 constexpr std::uint64_t kPluginFlameAudioLeadMs = 100u;
@@ -303,7 +303,7 @@ nfsmw_exhaust::vehicle_tone::Registry g_vehicleToneRegistry{};
 std::array<AudioBatchTone, 16> g_audioBatchTones{};
 std::atomic<bool> g_gameplayEffectsActive{false};
 bool g_exhaustSmokeEnabled = true;
-float g_exhaustSmokeIntensity = 1.15f;
+float g_exhaustSmokeIntensity = 1.3225f;
 HMODULE g_pluginModule = nullptr;
 using GameFrameTickFn = void(__cdecl*)(std::uint32_t elapsedMs);
 using GamePcmRenderFn = void(__cdecl*)(std::int16_t** samples,
@@ -2327,7 +2327,7 @@ bool registerCore() noexcept {
     g_exhaustSmokeEnabled =
         GetPrivateProfileIntA("ExhaustSmoke", "enabled", 1, configPath) != 0;
     char smokeIntensityText[32] = {};
-    GetPrivateProfileStringA("ExhaustSmoke", "intensity", "1.15",
+    GetPrivateProfileStringA("ExhaustSmoke", "intensity", "1.3225",
                              smokeIntensityText,
                              static_cast<DWORD>(sizeof(smokeIntensityText)),
                              configPath);
@@ -2339,7 +2339,7 @@ bool registerCore() noexcept {
         g_exhaustSmokeIntensity =
             std::clamp(parsedSmokeIntensity, 0.0f, 2.0f);
     } else {
-        g_exhaustSmokeIntensity = 1.15f;
+        g_exhaustSmokeIntensity = 1.3225f;
     }
     write("EXHAUST_SMOKE_CONFIG enabled=%d intensity=%.3f effect=%08X",
           g_exhaustSmokeEnabled ? 1 : 0,

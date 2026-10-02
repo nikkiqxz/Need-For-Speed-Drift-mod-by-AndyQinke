@@ -186,7 +186,7 @@ int main(int argc, char** argv) {
         NFSW_Exhaust_OnFrame(523);
         expect(state.vanillaCalls == callsAfterShutdown,
                "shutdown must stop frame processing and release callbacks");
-        expect(std::string(NFSW_Exhaust_Version()) == "1.1.47",
+        expect(std::string(NFSW_Exhaust_Version()) == "1.1.48",
                "C API version must match the release");
     } catch (const std::exception& error) {
         std::cerr << "NFSMWExhaustBackfire API tests failed: " << error.what()
