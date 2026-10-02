@@ -130,13 +130,41 @@ int main(int argc, char** argv) {
     spatial.gain = 0.85f;
     spatial.pan = 0.25f;
     spatial.lowPass = 1.0f;
+
+    if (!nfsmw_exhaust::native_audio::play(
+            "audio/backfire/./g1_01.wav", spatial)) {
+        std::fprintf(stderr, "pending voice enqueue failed\n");
+        return 1;
+    }
+    nfsmw_exhaust::native_audio::setPlaybackAllowed(false);
+    std::fill(gamePcm.begin(), gamePcm.end(), std::int16_t{0});
+    nfsmw_exhaust::native_audio::mixIntoGameBuffer(
+        gamePcm.data(), kFrames, 2, 48000);
+    if (!std::all_of(gamePcm.begin(), gamePcm.end(),
+                     [](std::int16_t sample) { return sample == 0; })) {
+        std::fprintf(stderr, "suspend did not clear queued voices\n");
+        return 1;
+    }
+    nfsmw_exhaust::native_audio::setPlaybackAllowed(true);
+
     if (!nfsmw_exhaust::native_audio::play(
             "audio/backfire/./g1_01.wav", spatial)) {
         std::fprintf(stderr, "tone-shaped software voice enqueue failed\n");
         return 1;
     }
+    constexpr const char* kSimultaneousAssets[] = {
+        "audio/backfire/./g1_02.wav", "audio/backfire/./g1_03.wav",
+        "audio/backfire/./g2_01.wav", "audio/backfire/./g2_02.wav",
+        "audio/backfire/./g2_03.wav"};
+    for (const char* asset : kSimultaneousAssets) {
+        if (!nfsmw_exhaust::native_audio::play(asset, spatial)) {
+            std::fprintf(stderr,
+                         "simultaneous multi-outlet voice enqueue failed\n");
+            return 1;
+        }
+    }
 
-    std::fill(gamePcm.begin(), gamePcm.end(), 0);
+    std::fill(gamePcm.begin(), gamePcm.end(), std::int16_t{0});
     nfsmw_exhaust::native_audio::mixIntoGameBuffer(
         gamePcm.data(), kFrames, 2, 48000);
     if (std::all_of(gamePcm.begin(), gamePcm.end(),
@@ -157,7 +185,7 @@ int main(int argc, char** argv) {
     }
 
     nfsmw_exhaust::native_audio::setPlaybackAllowed(false);
-    std::fill(gamePcm.begin(), gamePcm.end(), 0);
+    std::fill(gamePcm.begin(), gamePcm.end(), std::int16_t{0});
     nfsmw_exhaust::native_audio::mixIntoGameBuffer(
         gamePcm.data(), kFrames, 2, 48000);
     if (!std::all_of(gamePcm.begin(), gamePcm.end(),
@@ -174,7 +202,7 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "resumed mixer rejected a new voice\n");
         return 1;
     }
-    std::fill(gamePcm.begin(), gamePcm.end(), 0);
+    std::fill(gamePcm.begin(), gamePcm.end(), std::int16_t{0});
     nfsmw_exhaust::native_audio::mixIntoGameBuffer(
         gamePcm.data(), kFrames, 2, 48000);
     if (std::all_of(gamePcm.begin(), gamePcm.end(),
@@ -184,11 +212,11 @@ int main(int argc, char** argv) {
     }
 
     for (int block = 0; block < 48; ++block) {
-        std::fill(gamePcm.begin(), gamePcm.end(), 0);
+        std::fill(gamePcm.begin(), gamePcm.end(), std::int16_t{0});
         nfsmw_exhaust::native_audio::mixIntoGameBuffer(
             gamePcm.data(), kFrames, 2, 48000);
     }
-    std::fill(gamePcm.begin(), gamePcm.end(), 0);
+    std::fill(gamePcm.begin(), gamePcm.end(), std::int16_t{0});
     nfsmw_exhaust::native_audio::mixIntoGameBuffer(
         gamePcm.data(), kFrames, 2, 48000);
     if (!std::all_of(gamePcm.begin(), gamePcm.end(),

@@ -5,6 +5,7 @@
 
 #include <windows.h>
 #include <mmreg.h>
+#include <intrin.h>
 
 #include <algorithm>
 #include <array>
@@ -20,6 +21,7 @@ namespace {
 
 constexpr std::size_t kClipCount = 16;
 constexpr std::size_t kVoiceCount = 32;
+constexpr std::size_t kPendingVoiceCount = 64;
 constexpr std::size_t kMaxOutputChannels = 8;
 constexpr std::uint64_t kActiveVoiceMaskBits = UINT32_MAX;
 constexpr std::uint64_t kPendingPlayIncrement = 1ull << 32u;
@@ -98,6 +100,7 @@ struct Clip {
     std::string assetId;
     WAVEFORMATEX format{};
     std::vector<std::uint8_t> samples;
+    std::vector<float> monoSamples;
 };
 
 struct VoiceSlot {
@@ -122,16 +125,25 @@ struct VoiceSlot {
     float wetTone = 1.0f;
 };
 
+struct PendingVoice {
+    const Clip* clip = nullptr;
+    Spatialization spatial{};
+};
+
 std::array<Clip, kClipCount> g_clips{};
 Clip g_backgroundIn{};
 Clip g_backgroundOut{};
 std::array<VoiceSlot, kVoiceCount> g_voices{};
-// Low 32 bits track active slots; high 32 bits count plays waiting to enqueue.
+std::array<PendingVoice, kPendingVoiceCount> g_pendingVoices{};
+std::size_t g_pendingVoiceRead = 0;
+std::size_t g_pendingVoiceCount = 0;
+// Low 32 bits track active slots; high 32 bits count queued play requests.
 // A single atomic snapshot makes the idle fast path linearizable.
 std::atomic<std::uint64_t> g_voiceState{0};
 std::atomic<bool> g_playbackAllowed{false};
 std::uint64_t g_sequence = 0;
 CRITICAL_SECTION g_voiceLock{};
+CRITICAL_SECTION g_pendingVoiceLock{};
 bool g_lockInitialized = false;
 bool g_initialized = false;
 bool g_ready = false;
@@ -313,14 +325,34 @@ float monoPcm16At(const Clip& clip, std::size_t frame) noexcept {
     return sample / static_cast<float>(clip.format.nChannels);
 }
 
+bool rebuildMonoSamples(Clip* clip) noexcept {
+    if (clip == nullptr || clip->format.nBlockAlign == 0 ||
+        clip->format.nChannels == 0 ||
+        clip->samples.size() % clip->format.nBlockAlign != 0) {
+        return false;
+    }
+    const std::size_t frameCount =
+        clip->samples.size() / clip->format.nBlockAlign;
+    try {
+        clip->monoSamples.resize(frameCount);
+    } catch (...) {
+        clip->monoSamples.clear();
+        return false;
+    }
+    for (std::size_t frame = 0; frame < frameCount; ++frame) {
+        clip->monoSamples[frame] = monoPcm16At(*clip, frame);
+    }
+    return true;
+}
+
 float interpolatedMonoSample(const Clip& clip, double frame) noexcept {
-    const std::size_t frameCount = clip.samples.size() / clip.format.nBlockAlign;
+    const std::size_t frameCount = clip.monoSamples.size();
     if (frame < 0.0 || frame >= static_cast<double>(frameCount)) return 0.0f;
     const auto first = static_cast<std::size_t>(frame);
     const std::size_t second = std::min(first + 1u, frameCount - 1u);
     const float fraction = static_cast<float>(frame - first);
-    const float left = monoPcm16At(clip, first);
-    return left + (monoPcm16At(clip, second) - left) * fraction;
+    const float left = clip.monoSamples[first];
+    return left + (clip.monoSamples[second] - left) * fraction;
 }
 
 bool mixBackgroundPair(Clip* mainClip, const Clip& backgroundIn,
@@ -370,6 +402,50 @@ VoiceSlot* acquireVoice() noexcept {
     for (auto& slot : g_voices)
         if (slot.sequence < oldest->sequence) oldest = &slot;
     return oldest;
+}
+
+void startVoice(const PendingVoice& pending,
+                std::uint32_t* activeMask) noexcept {
+    if (pending.clip == nullptr || activeMask == nullptr) return;
+    VoiceSlot* slot = acquireVoice();
+    ++g_sequence;
+    if (g_sequence == 0) ++g_sequence;
+    *slot = {};
+    slot->clip = pending.clip;
+    slot->sequence = g_sequence;
+    slot->gain = kBaseGain *
+                 std::clamp(pending.spatial.gain, 0.0f, 1.0f);
+    slot->pan = std::clamp(pending.spatial.pan, -1.0f, 1.0f);
+    slot->lowPass = std::clamp(pending.spatial.lowPass, 0.0f, 1.0f);
+    slot->toneCharacter =
+        std::clamp(pending.spatial.toneCharacter, 0.0f, 2.0f);
+    const std::size_t slotIndex =
+        static_cast<std::size_t>(slot - g_voices.data());
+    *activeMask |= std::uint32_t{1} << slotIndex;
+}
+
+void drainPendingVoices(std::uint32_t* activeMask) noexcept {
+    if (activeMask == nullptr) return;
+    EnterCriticalSection(&g_pendingVoiceLock);
+    const std::size_t drained = g_pendingVoiceCount;
+    for (std::size_t index = 0; index < drained; ++index) {
+        startVoice(g_pendingVoices[g_pendingVoiceRead], activeMask);
+        g_pendingVoices[g_pendingVoiceRead] = {};
+        g_pendingVoiceRead = (g_pendingVoiceRead + 1u) % kPendingVoiceCount;
+    }
+    g_pendingVoiceCount = 0;
+    LeaveCriticalSection(&g_pendingVoiceLock);
+    if (drained != 0) {
+        g_voiceState.fetch_sub(
+            static_cast<std::uint64_t>(drained) * kPendingPlayIncrement,
+            std::memory_order_release);
+    }
+}
+
+void clearPendingVoices() noexcept {
+    for (auto& pending : g_pendingVoices) pending = {};
+    g_pendingVoiceRead = 0;
+    g_pendingVoiceCount = 0;
 }
 
 void replaceActiveVoiceMask(std::uint32_t activeMask) noexcept {
@@ -579,6 +655,7 @@ bool initialize(const char* modulePath, const char* audioManifestPath) noexcept 
     g_initialized = true;
     if (!g_lockInitialized) {
         InitializeCriticalSection(&g_voiceLock);
+        InitializeCriticalSection(&g_pendingVoiceLock);
         g_lockInitialized = true;
     }
     nfsmw_exhaust::AudioBank audioBank;
@@ -615,7 +692,8 @@ bool initialize(const char* modulePath, const char* audioManifestPath) noexcept 
         return false;
     }
     for (auto& clip : g_clips) {
-        if (!mixBackgroundPair(&clip, g_backgroundIn, g_backgroundOut)) {
+        if (!mixBackgroundPair(&clip, g_backgroundIn, g_backgroundOut) ||
+            !rebuildMonoSamples(&clip)) {
             native_log::write("AUDIO_INIT_FAIL background format mismatch asset='%s'",
                               clip.assetId.c_str());
             shutdown();
@@ -626,7 +704,7 @@ bool initialize(const char* modulePath, const char* audioManifestPath) noexcept 
     g_playbackAllowed.store(true, std::memory_order_release);
     const auto& format = g_clips[0].format;
     native_log::write(
-        "AUDIO_INIT_OK backend=GamePCM clips=%u backgrounds=2 voices=%u "
+        "AUDIO_INIT_OK backend=GamePCM clips=%u backgrounds=2 voices=%u queue=%u "
         "format=%uHz/%ubit/%uch spatial=1 volume=%.6f directPanScale=%.2f "
         "reverb=1 reverbGain=%.3f preset=OPEN_AIR "
         "tone=pitch%.2f/bass%.2f@%.0fHz/metal%.0fHz+%.1fdB/Q%.1f/"
@@ -635,7 +713,8 @@ bool initialize(const char* modulePath, const char* audioManifestPath) noexcept 
         "vehicleTone=darkx%.2f/pitch-%.1fpct/gain%.2f "
         "brightHighx%.2f/lowCut%.2f/pitch+%.1fpct",
         static_cast<unsigned>(g_clips.size()),
-        static_cast<unsigned>(g_voices.size()), format.nSamplesPerSec,
+        static_cast<unsigned>(g_voices.size()),
+        static_cast<unsigned>(g_pendingVoices.size()), format.nSamplesPerSec,
         format.wBitsPerSample, format.nChannels,
         static_cast<double>(kBaseGain), static_cast<double>(kDirectPanScale),
         static_cast<double>(kReverbGain), static_cast<double>(kTonePitchRatio),
@@ -664,38 +743,23 @@ bool initialize(const char* modulePath, const char* audioManifestPath) noexcept 
 bool play(const char* assetId, const Spatialization& spatial) noexcept {
     if (!g_lockInitialized ||
         !g_playbackAllowed.load(std::memory_order_acquire)) return false;
-    g_voiceState.fetch_add(kPendingPlayIncrement, std::memory_order_acq_rel);
-    EnterCriticalSection(&g_voiceLock);
+    EnterCriticalSection(&g_pendingVoiceLock);
     if (!g_ready ||
         !g_playbackAllowed.load(std::memory_order_acquire)) {
-        LeaveCriticalSection(&g_voiceLock);
-        g_voiceState.fetch_sub(kPendingPlayIncrement,
-                               std::memory_order_release);
+        LeaveCriticalSection(&g_pendingVoiceLock);
         return false;
     }
     const Clip* clip = findClip(assetId);
-    if (clip == nullptr) {
-        LeaveCriticalSection(&g_voiceLock);
-        g_voiceState.fetch_sub(kPendingPlayIncrement,
-                               std::memory_order_release);
+    if (clip == nullptr || g_pendingVoiceCount >= kPendingVoiceCount) {
+        LeaveCriticalSection(&g_pendingVoiceLock);
         return false;
     }
-    VoiceSlot* slot = acquireVoice();
-    ++g_sequence;
-    if (g_sequence == 0) ++g_sequence;
-    *slot = {};
-    slot->clip = clip;
-    slot->sequence = g_sequence;
-    slot->gain = kBaseGain * std::clamp(spatial.gain, 0.0f, 1.0f);
-    slot->pan = std::clamp(spatial.pan, -1.0f, 1.0f);
-    slot->lowPass = std::clamp(spatial.lowPass, 0.0f, 1.0f);
-    slot->toneCharacter = std::clamp(spatial.toneCharacter, 0.0f, 2.0f);
-    const std::size_t slotIndex =
-        static_cast<std::size_t>(slot - g_voices.data());
-    g_voiceState.fetch_or(std::uint64_t{1} << slotIndex,
-                          std::memory_order_release);
-    LeaveCriticalSection(&g_voiceLock);
-    g_voiceState.fetch_sub(kPendingPlayIncrement, std::memory_order_release);
+    const std::size_t write =
+        (g_pendingVoiceRead + g_pendingVoiceCount) % kPendingVoiceCount;
+    g_pendingVoices[write] = PendingVoice{clip, spatial};
+    ++g_pendingVoiceCount;
+    g_voiceState.fetch_add(kPendingPlayIncrement, std::memory_order_release);
+    LeaveCriticalSection(&g_pendingVoiceLock);
     return true;
 }
 
@@ -718,13 +782,17 @@ void mixIntoGameBuffer(std::int16_t* samples, std::size_t frameCount,
         g_voiceState.load(std::memory_order_relaxed);
     std::uint32_t activeMask =
         static_cast<std::uint32_t>(voiceState & kActiveVoiceMaskBits);
+    drainPendingVoices(&activeMask);
     for (std::size_t frame = 0; frame < frameCount; ++frame) {
         if (activeMask == 0) break;
         float plugin[kMaxOutputChannels]{};
         bool active = false;
-        for (std::size_t index = 0; index < g_voices.size(); ++index) {
-            const std::uint32_t bit = 1u << index;
-            if ((activeMask & bit) == 0) continue;
+        std::uint32_t remainingVoices = activeMask;
+        while (remainingVoices != 0) {
+            unsigned long index = 0;
+            _BitScanForward(&index, remainingVoices);
+            const std::uint32_t bit = std::uint32_t{1} << index;
+            remainingVoices &= ~bit;
             if (renderVoiceFrame(&g_voices[index], channels, sampleRate,
                                  plugin)) {
                 active = true;
@@ -758,28 +826,33 @@ void setPlaybackAllowed(bool allowed) noexcept {
         g_playbackAllowed.store(false, std::memory_order_release);
     }
     EnterCriticalSection(&g_voiceLock);
+    EnterCriticalSection(&g_pendingVoiceLock);
     if (allowed && g_ready) {
         g_playbackAllowed.store(true, std::memory_order_release);
     } else {
         g_playbackAllowed.store(false, std::memory_order_release);
         for (auto& voice : g_voices) voice = {};
-        replaceActiveVoiceMask(0);
+        clearPendingVoices();
+        g_voiceState.store(0, std::memory_order_release);
     }
+    LeaveCriticalSection(&g_pendingVoiceLock);
     LeaveCriticalSection(&g_voiceLock);
 }
 
 void shutdown() noexcept {
     g_playbackAllowed.store(false, std::memory_order_release);
     if (g_lockInitialized) EnterCriticalSection(&g_voiceLock);
+    if (g_lockInitialized) EnterCriticalSection(&g_pendingVoiceLock);
     g_ready = false;
     for (auto& voice : g_voices) voice = {};
-    g_voiceState.fetch_and(~kActiveVoiceMaskBits,
-                           std::memory_order_release);
+    clearPendingVoices();
+    g_voiceState.store(0, std::memory_order_release);
     for (auto& clip : g_clips) clip = {};
     g_backgroundIn = {};
     g_backgroundOut = {};
     g_sequence = 0;
     if (g_lockInitialized) {
+        LeaveCriticalSection(&g_pendingVoiceLock);
         LeaveCriticalSection(&g_voiceLock);
     }
     g_initialized = false;

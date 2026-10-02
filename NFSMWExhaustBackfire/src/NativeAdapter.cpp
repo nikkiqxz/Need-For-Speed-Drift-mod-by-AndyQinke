@@ -64,6 +64,7 @@ constexpr std::uint32_t kEmitterTimeStepBits = 0x3C088889u;
 constexpr std::uint64_t kPluginFlamePulseMs = 770u;
 constexpr std::uint64_t kPluginFlameAudioLeadMs = 100u;
 constexpr std::uint64_t kMultiOutletStepMs = 300u;
+constexpr unsigned kMaxOutletStartsPerFrame = 2u;
 constexpr float kPluginFlameIntensity = 1.0f;
 constexpr std::uint32_t kGameFlowRacing = 6u;
 
@@ -883,6 +884,9 @@ void logVehicleResolveFailure(
 #endif
 
 void scanVehicles(std::uint64_t nowMs) noexcept {
+#if !NFSMW_EXHAUST_ENABLE_LOGGING
+    (void)nowMs;
+#endif
     for (auto& record : g_records) record.seen = false;
     g_cachedCount = 0;
 
@@ -1500,6 +1504,7 @@ int NFSW_EXHAUST_CALL spawnFlame(void*,
 
 void servicePluginFlamePulses(std::uint64_t nowMs) noexcept {
     if (g_originalUpdateEmitter == nullptr) return;
+    unsigned outletStarts = 0;
     for (auto& connection : g_connections) {
         if (connection.pluginPulseMask == 0) continue;
         for (std::size_t index = 0; index < connection.emitterCount; ++index) {
@@ -1530,8 +1535,11 @@ void servicePluginFlamePulses(std::uint64_t nowMs) noexcept {
         for (std::size_t index = 0; index < connection.emitterCount; ++index) {
             const std::uint32_t bit = 1u << index;
             if ((connection.pluginPulseMask & bit) == 0) continue;
+            const bool starting =
+                connection.pluginPulseLastUpdateMs[index] == 0;
             if (connection.pluginPulseStartMs[index] > nowMs ||
                 connection.pluginPulseLastUpdateMs[index] == nowMs ||
+                (starting && outletStarts >= kMaxOutletStartsPerFrame) ||
                 !connectionOwnsEmitter(connection, index)) {
                 continue;
             }
@@ -1541,6 +1549,12 @@ void servicePluginFlamePulses(std::uint64_t nowMs) noexcept {
                     connection.emitters[index], parentMatrix,
                     connection.pluginPulseEffectKeys[index],
                     kEmitterTimeStepBits, kPluginFlameIntensity, velocity);
+                if (starting) {
+                    ++outletStarts;
+                    connection.pluginPulseStartMs[index] = nowMs;
+                    connection.pluginPulseUntilMs[index] =
+                        nowMs + kPluginFlamePulseMs;
+                }
                 connection.pluginPulseLastUpdateMs[index] = nowMs;
             } __except (EXCEPTION_EXECUTE_HANDLER) {
                 clearOutletPulse(connection, index);
@@ -1578,6 +1592,7 @@ void appendPluginFlameLightsToSunSet() noexcept {
         for (std::size_t index = 0; index < connection.emitterCount; ++index) {
             const std::uint32_t bit = 1u << index;
             if ((connection.pluginPulseMask & bit) != 0 &&
+                connection.pluginPulseLastUpdateMs[index] != 0 &&
                 connection.pluginPulseStartMs[index] <= nowMs &&
                 connection.pluginPulseUntilMs[index] >= nowMs) {
                 hasActivePulse = true;
@@ -1633,6 +1648,7 @@ void appendPluginFlameLightsToSunSet() noexcept {
                 break;
             }
             if ((connection.pluginPulseMask & (1u << index)) == 0 ||
+                connection.pluginPulseLastUpdateMs[index] == 0 ||
                 connection.pluginPulseStartMs[index] > nowMs ||
                 connection.pluginPulseUntilMs[index] < nowMs ||
                 (connection.markerHashes[index] != kLeftExhaustHash &&
