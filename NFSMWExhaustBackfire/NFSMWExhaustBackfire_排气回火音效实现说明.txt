@@ -1,7 +1,7 @@
 NFSMW Exhaust Backfire 排气回火音效实现说明
 ================================================
 
-适用版本：v1.1.49
+适用版本：v1.1.50
 游戏：Need for Speed: Most Wanted (2005)
 生成日期：2026-09-30
 
@@ -432,6 +432,15 @@ OnCycle 仍为 0.12 秒。
 V6 节点为 emcar_backfire_smoke_soft_v6_1、emcar_backfire_smoke_soft_v6_2 和
 fxcar_backfire_smoke_soft_v6（哈希 0xAB11339D）。插件只调用 V6，更新时必须
 再次导入随包 NFSMS；已经存在的 V1-V5 节点不会被调用。
+
+v1.1.50 以 V6 为基准将尾气浓度提高 40%，每层 NumParticles 从 19 乘以 1.4
+并取整为 27。粒子尺寸曲线统一提高 15%，从 0.336/0.54/0.90/1.26 调整为
+0.3864/0.621/1.035/1.449。运行时 intensity 继续保持已验证稳定的 1.15，
+Life、LifeVariance 和 OnCycle 均不变。
+
+V7 节点为 emcar_backfire_smoke_soft_v7_1、emcar_backfire_smoke_soft_v7_2 和
+fxcar_backfire_smoke_soft_v7（哈希 0xDC1A91D9）。插件只调用 V7，更新时必须
+再次导入随包 NFSMS；已经存在的 V1-V6 节点不会被调用。
 
 
 十一、相关实现文件

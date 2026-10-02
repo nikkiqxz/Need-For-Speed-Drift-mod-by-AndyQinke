@@ -58,8 +58,8 @@ constexpr std::uintptr_t kGetPositionMarker = 0x005016D0u;
 constexpr std::uint32_t kLeftExhaustHash = 0xBCF8A18Bu;
 constexpr std::uint32_t kRightExhaustHash = 0xBD7CF15Eu;
 constexpr std::uint32_t kContinuousBackfireEffectAttributeHash = 0x60CEC115u;
-// bStringHash("fxcar_backfire_smoke_soft_v6"), installed by the bundled NFSMS.
-constexpr std::uint32_t kPluginSmokeEffectKey = 0xAB11339Du;
+// bStringHash("fxcar_backfire_smoke_soft_v7"), installed by the bundled NFSMS.
+constexpr std::uint32_t kPluginSmokeEffectKey = 0xDC1A91D9u;
 constexpr std::uint32_t kEmitterTimeStepBits = 0x3C088889u;
 constexpr std::uint64_t kPluginFlamePulseMs = 770u;
 constexpr std::uint64_t kPluginFlameAudioLeadMs = 100u;
