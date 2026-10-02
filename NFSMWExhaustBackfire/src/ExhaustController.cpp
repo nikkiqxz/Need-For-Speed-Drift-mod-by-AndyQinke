@@ -119,7 +119,8 @@ void ExhaustController::processVehicle(const VehicleSnapshot& snapshot,
         state.burstActive = false;
         state.burstShots.clear();
         state.burstIndex = 0;
-        state.nitrousAudio.clear();
+        state.pendingAudio.clear();
+        state.audioBatchSequences.clear();
         state.previousNearLimit = false;
         state.previousShiftInProgress = snapshot.shiftInProgress;
         state.shiftPhase = VehicleState::ShiftPhase::Idle;
@@ -131,10 +132,6 @@ void ExhaustController::processVehicle(const VehicleSnapshot& snapshot,
         state.previousGearChanged = snapshot.gearChanged;
         state.previousGear = snapshot.gear;
         state.previousGearValid = true;
-        if (snapshot.driverControlsValid) {
-            state.nitrousStateValid = true;
-            state.previousNitrousActive = snapshot.nitrousActive;
-        }
         return;
     }
 
@@ -279,17 +276,6 @@ void ExhaustController::processVehicle(const VehicleSnapshot& snapshot,
         }
     }
 
-    if (snapshot.driverControlsValid) {
-        if (!state.nitrousStateValid) {
-            state.nitrousStateValid = true;
-            state.previousNitrousActive = snapshot.nitrousActive;
-        } else if (snapshot.nitrousActive != state.previousNitrousActive) {
-            startNitrousAudio(state, snapshot, nowMs,
-                              snapshot.nitrousActive);
-            state.previousNitrousActive = snapshot.nitrousActive;
-        }
-    }
-
     const bool shifting =
         state.shiftPhase != VehicleState::ShiftPhase::Idle || shiftSignal;
 
@@ -323,7 +309,7 @@ void ExhaustController::processVehicle(const VehicleSnapshot& snapshot,
     if (!state.burstActive && state.sustainedArmed) {
         serviceSustained(state, snapshot, nowMs);
     }
-    serviceNitrousAudio(state, snapshot, nowMs);
+    servicePendingAudio(state, snapshot, nowMs);
 
     state.previousShiftEvent = snapshot.shiftEvent;
     state.previousGearChanged = snapshot.gearChanged;
@@ -345,6 +331,9 @@ void ExhaustController::startBurst(VehicleState& state,
                                    std::uint64_t nowMs) {
     (void)snapshot;
     const bool downshift = state.shiftDirection == ShiftDirection::Down;
+    const float audioProbability = downshift
+        ? config_.downshiftFlameAudioProbability
+        : config_.upshiftFlameAudioProbability;
     const std::uint32_t shots = downshift
                                     ? randomBetween(
                                           config_.downshiftBurstMinShots,
@@ -371,8 +360,14 @@ void ExhaustController::startBurst(VehicleState& state,
         const std::uint32_t segmentEnd =
             ((i + 1u) * positions) / shots - 1u;
         const std::uint32_t offset = randomBetween(segmentStart, segmentEnd);
+        ++state.nextSequenceId;
+        if (state.nextSequenceId == 0) ++state.nextSequenceId;
         state.burstShots.push_back(
-            VehicleState::ScheduledShot{nowMs + offset, nowMs + window});
+            VehicleState::ScheduledShot{nowMs + offset, nowMs + window,
+                                        ExhaustSide::Left, false,
+                                        FlamePattern::Standalone,
+                                        state.nextSequenceId,
+                                        audioProbability});
     }
     std::sort(state.burstShots.begin(), state.burstShots.end(),
               [](const VehicleState::ScheduledShot& left,
@@ -414,12 +409,18 @@ void ExhaustController::startPairedShift(
         pattern == VehicleState::PairedPattern::Sequential
             ? FlamePattern::Sequential
             : FlamePattern::Simultaneous;
+    const float audioProbability =
+        state.shiftDirection == ShiftDirection::Down
+            ? config_.downshiftFlameAudioProbability
+            : config_.upshiftFlameAudioProbability;
     state.burstShots.push_back(
         VehicleState::ScheduledShot{nowMs, deadline, first, true,
-                                    flamePattern, state.nextSequenceId});
+                                    flamePattern, state.nextSequenceId,
+                                    audioProbability});
     state.burstShots.push_back(
         VehicleState::ScheduledShot{secondAt, deadline, second, true,
-                                    flamePattern, state.nextSequenceId});
+                                    flamePattern, state.nextSequenceId,
+                                    audioProbability});
     std::stable_sort(
         state.burstShots.begin(), state.burstShots.end(),
         [](const VehicleState::ScheduledShot& left,
@@ -450,7 +451,8 @@ void ExhaustController::serviceBurst(VehicleState& state,
         const ExhaustSide side =
             shot.fixedSide ? shot.side : chooseSide(snapshot);
         if (emitOne(state, snapshot, side, shot.dueMs, nowMs,
-                    shot.pattern, shot.sequenceId)) {
+                    shot.pattern, shot.sequenceId,
+                    shot.audioProbability)) {
             ++state.burstIndex;
         } else {
             break;
@@ -463,52 +465,16 @@ void ExhaustController::serviceBurst(VehicleState& state,
     }
 }
 
-void ExhaustController::startNitrousAudio(
-    VehicleState& state, const VehicleSnapshot& snapshot,
-    std::uint64_t nowMs, bool starting) {
-    const float probability = starting ? config_.nitrousStartProbability
-                                       : config_.nitrousEndProbability;
-    const bool triggered = shouldTrigger(probability);
-    const bool sequential =
-        triggered && shouldTrigger(config_.nitrousSequentialProbability);
-    char message[224]{};
-    std::snprintf(
-        message, sizeof(message),
-        "NITROUS_DECISION vehicle=%u phase=%s probability=%.3f triggered=%d "
-        "pattern=%s",
-        snapshot.id, starting ? "START" : "END",
-        static_cast<double>(probability), triggered ? 1 : 0,
-        !triggered ? "NONE" : (sequential ? "SEQUENTIAL" : "SIMULTANEOUS"));
-    bridge_.log(message);
-    if (!triggered) return;
-
-    const ExhaustSide first = (nextRandom() & 1u) == 0u
-                                  ? ExhaustSide::Left
-                                  : ExhaustSide::Right;
-    const ExhaustSide second = first == ExhaustSide::Left
-                                   ? ExhaustSide::Right
-                                   : ExhaustSide::Left;
-    state.nitrousAudio.push_back(
-        VehicleState::ScheduledAudio{nowMs, first});
-    state.nitrousAudio.push_back(VehicleState::ScheduledAudio{
-        sequential ? nowMs + config_.pairedSideDelayMs : nowMs, second});
-    std::stable_sort(
-        state.nitrousAudio.begin(), state.nitrousAudio.end(),
-        [](const VehicleState::ScheduledAudio& left,
-           const VehicleState::ScheduledAudio& right) {
-            return left.dueMs < right.dueMs;
-        });
-}
-
-void ExhaustController::serviceNitrousAudio(
+void ExhaustController::servicePendingAudio(
     VehicleState& state, const VehicleSnapshot& snapshot,
     std::uint64_t nowMs) {
-    while (!state.nitrousAudio.empty() &&
-           state.nitrousAudio.front().dueMs <= nowMs) {
-        const VehicleState::ScheduledAudio request =
-            state.nitrousAudio.front();
-        state.nitrousAudio.erase(state.nitrousAudio.begin());
-        emitAudio(snapshot, request.side, request.dueMs, nowMs);
+    while (!state.pendingAudio.empty() &&
+           state.pendingAudio.front().dueMs <= nowMs) {
+        const VehicleState::ScheduledAudio request = state.pendingAudio.front();
+        state.pendingAudio.pop_front();
+        emitAudio(snapshot, request.side, request.clipIndex,
+                  request.sequenceId,
+                  request.dueMs, nowMs);
     }
 }
 
@@ -520,7 +486,11 @@ void ExhaustController::serviceSustained(VehicleState& state,
 
     const ExhaustSide side = chooseSide(snapshot);
     if (shouldTrigger(snapshot)) {
-        emitOne(state, snapshot, side, nowMs, nowMs);
+        ++state.nextSequenceId;
+        if (state.nextSequenceId == 0) ++state.nextSequenceId;
+        emitOne(state, snapshot, side, nowMs, nowMs,
+                FlamePattern::Standalone, state.nextSequenceId,
+                config_.sustainedFlameAudioProbability);
     }
     state.nextSustainedAtMs =
         nowMs + randomBetween(config_.sustainedMinIntervalMs,
@@ -533,7 +503,8 @@ bool ExhaustController::emitOne(VehicleState& state,
                                 std::uint64_t scheduledAtMs,
                                 std::uint64_t nowMs,
                                 FlamePattern pattern,
-                                std::uint32_t sequenceId) {
+                                std::uint32_t sequenceId,
+                                float audioProbability) {
     const ExhaustMarker& marker =
         side == ExhaustSide::Left ? snapshot.leftExhaust
                                   : snapshot.rightExhaust;
@@ -551,8 +522,9 @@ bool ExhaustController::emitOne(VehicleState& state,
     flame.marker = marker;
     if (!bridge_.spawnExhaustFlame(flame)) return false;
 
-    if (shouldTrigger(config_.flameAudioProbability)) {
-        emitAudio(snapshot, side, scheduledAtMs, nowMs);
+    if (shouldTrigger(audioProbability)) {
+        scheduleAudioBatch(state, snapshot, sequenceId, side,
+                           scheduledAtMs, nowMs);
     }
 
     state.hasEmitted = true;
@@ -560,20 +532,84 @@ bool ExhaustController::emitOne(VehicleState& state,
     return true;
 }
 
+void ExhaustController::scheduleAudioBatch(
+    VehicleState& state, const VehicleSnapshot& snapshot,
+    std::uint32_t sequenceId, ExhaustSide preferredSide,
+    std::uint64_t scheduledAtMs, std::uint64_t nowMs) {
+    if (snapshot.leftExhaustCount == 0 && snapshot.rightExhaustCount == 0) {
+        state.pendingAudio.push_back(VehicleState::ScheduledAudio{
+            scheduledAtMs, preferredSide, drawAudioClip(), sequenceId});
+        return;
+    }
+    while (!state.audioBatchSequences.empty() &&
+           state.audioBatchSequences.front().expiresAtMs < nowMs) {
+        state.audioBatchSequences.pop_front();
+    }
+    if (sequenceId != 0) {
+        for (const auto& record : state.audioBatchSequences) {
+            if (record.sequenceId == sequenceId) return;
+        }
+        state.audioBatchSequences.push_back(
+            VehicleState::AudioBatchSequence{sequenceId, nowMs + 5000u});
+    }
+
+    const std::uint32_t leftCount = snapshot.leftExhaustCount != 0
+                                        ? snapshot.leftExhaustCount
+                                        : (snapshot.leftExhaust.present ? 1u : 0u);
+    const std::uint32_t rightCount = snapshot.rightExhaustCount != 0
+                                         ? snapshot.rightExhaustCount
+                                         : (snapshot.rightExhaust.present ? 1u : 0u);
+    const std::uint32_t total = leftCount + rightCount;
+    if (total == 0) return;
+    const std::uint32_t maximum = std::min<std::uint32_t>(6u, total);
+    const std::uint32_t minimum =
+        std::min<std::uint32_t>(3u, (total + 1u) / 2u);
+    const std::uint32_t count = randomBetween(minimum, maximum);
+    const bool sequential = count > 1u &&
+        shouldTrigger(config_.audioBatchSequentialProbability);
+    const std::uint64_t stepMs = total <= 2u ? 300u
+                                 : total <= 4u ? 200u
+                                               : 100u;
+
+    std::array<std::uint8_t, AudioBank::kClipCount> clips{};
+    for (std::uint32_t index = 0; index < count; ++index) {
+        clips[index] = drawAudioClip();
+    }
+
+    std::uint32_t remainingLeft = leftCount;
+    std::uint32_t remainingRight = rightCount;
+    for (std::uint32_t index = 0; index < count; ++index) {
+        const std::uint32_t remaining = remainingLeft + remainingRight;
+        const bool useLeft = remainingRight == 0 ||
+            (remainingLeft != 0 && randomBetween(1u, remaining) <= remainingLeft);
+        if (useLeft) --remainingLeft;
+        else --remainingRight;
+        state.pendingAudio.push_back(VehicleState::ScheduledAudio{
+            nowMs + (sequential ? index * stepMs : 0u),
+            useLeft ? ExhaustSide::Left : ExhaustSide::Right,
+            clips[index], sequenceId});
+    }
+    std::stable_sort(state.pendingAudio.begin(), state.pendingAudio.end(),
+                     [](const auto& left, const auto& right) {
+                         return left.dueMs < right.dueMs;
+                     });
+}
+
 void ExhaustController::emitAudio(const VehicleSnapshot& snapshot,
                                   ExhaustSide side,
+                                  std::uint8_t clipIndex,
+                                  std::uint32_t sequenceId,
                                   std::uint64_t scheduledAtMs,
                                   std::uint64_t nowMs) {
     AudioRequest audio{};
     audio.vehicleId = snapshot.id;
     audio.scheduledAtMs = scheduledAtMs;
     audio.emittedAtMs = nowMs;
+    audio.sequenceId = sequenceId;
     audio.side = side;
     audio.marker = side == ExhaustSide::Left ? snapshot.leftExhaust
                                               : snapshot.rightExhaust;
     if (!audio.marker.present) return;
-    const std::uint32_t clipIndex =
-        randomBetween(0u, static_cast<std::uint32_t>(AudioBank::kClipCount - 1u));
     audio.cue = audioBank_.at(clipIndex);
     bridge_.playBackfireAudio(audio);
 }
@@ -671,6 +707,11 @@ ExhaustSide ExhaustController::chooseSide(
     if (!left) return ExhaustSide::Right;
     if (!right) return ExhaustSide::Left;
     return (random & 1u) == 0u ? ExhaustSide::Left : ExhaustSide::Right;
+}
+
+std::uint8_t ExhaustController::drawAudioClip() {
+    return static_cast<std::uint8_t>(
+        randomBetween(0u, static_cast<std::uint32_t>(AudioBank::kClipCount - 1u)));
 }
 
 std::uint32_t ExhaustController::nextRandom() {

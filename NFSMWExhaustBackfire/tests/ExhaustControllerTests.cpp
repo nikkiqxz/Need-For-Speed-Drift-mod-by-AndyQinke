@@ -3,6 +3,7 @@
 #include "nfsmw_exhaust/ExhaustController.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -90,9 +91,10 @@ ExhaustConfig deterministicConfig() {
     config.downshiftProbabilityScale = 1.0f;
     config.pairedShiftMode = false;
     config.sustainedProbability = 1.0f;
-    config.flameAudioProbability = 1.0f;
-    config.nitrousStartProbability = 1.0f;
-    config.nitrousEndProbability = 1.0f;
+    config.upshiftFlameAudioProbability = 1.0f;
+    config.downshiftFlameAudioProbability = 1.0f;
+    config.sustainedFlameAudioProbability = 1.0f;
+    config.audioBatchSequentialProbability = 0.0f;
     config.normalize();
     return config;
 }
@@ -117,7 +119,7 @@ void expectAudioMatchesFlames(const RecordingBridge& bridge) {
         expect(bridge.audio[i].cue.assetId != nullptr,
                "audio cue must have an asset identifier");
         expect(bridge.audio[i].cue.clipIndex < AudioBank::kClipCount,
-               "audio clip must be one of the twelve flat slots");
+               "audio clip must be one of the sixteen flat slots");
     }
 }
 
@@ -177,28 +179,30 @@ void testShippedConfiguration(const char* sourceDirectory) {
     expect(config.sustainedMinIntervalMs == 275 &&
                config.sustainedMaxIntervalMs == 750,
            "the shipped sustained density must be reduced by 80 percent");
-    expectNear(config.sustainedProbability, 0.20f, 1e-6f,
-                "the shipped sustained attempt probability must be 20 percent");
-    expectNear(config.neutralSustainedProbability, 0.45f, 1e-6f,
-               "neutral throttle must use a 45 percent sustained probability");
+    expectNear(config.sustainedProbability, 0.40f, 1e-6f,
+                 "the shipped sustained attempt probability must be 40 percent");
+    expectNear(config.neutralSustainedProbability, 0.70f, 1e-6f,
+               "neutral throttle must use a 70 percent sustained probability");
     expectNear(config.neutralMinGasInput, 0.25f, 1e-6f,
                "neutral boost must require 25 percent throttle");
-    expectNear(config.flameAudioProbability, 0.30f, 1e-6f,
-               "each accepted flame must use a 30 percent audio chance");
+    expectNear(config.upshiftFlameAudioProbability, 0.50f, 1e-6f,
+               "upshift flames must use a 50 percent audio chance");
+    expectNear(config.downshiftFlameAudioProbability, 0.70f, 1e-6f,
+               "downshift flames must use a 70 percent audio chance");
+    expectNear(config.sustainedFlameAudioProbability, 0.30f, 1e-6f,
+               "sustained flames must use a 30 percent audio chance");
     expect(config.pairedShiftMode,
            "the shipped configuration must use paired shift mode");
-    expectNear(config.shiftSimultaneousProbability, 0.225f, 1e-6f,
-               "upshifts must use 22.5 percent simultaneous probability");
-    expectNear(config.shiftSequentialProbability, 0.175f, 1e-6f,
-               "upshifts must use 17.5 percent sequential probability");
+    expectNear(config.shiftSimultaneousProbability, 0.3375f, 1e-6f,
+                "upshifts must use 33.75 percent simultaneous probability");
+    expectNear(config.shiftSequentialProbability, 0.2625f, 1e-6f,
+                "upshifts must use 26.25 percent sequential probability");
     expectNear(config.pairedDownshiftProbability, 0.80f, 1e-6f,
                "paired downshifts must use a fixed 80 percent probability");
     expect(config.pairedSideDelayMs == 300,
            "paired sequential events must use a 300 ms delay");
-    expectNear(config.nitrousStartProbability, 0.30f, 1e-6f,
-               "NOS activation probability must be 30 percent");
-    expectNear(config.nitrousEndProbability, 0.35f, 1e-6f,
-               "NOS end probability must be 35 percent");
+    expectNear(config.audioBatchSequentialProbability, 0.50f, 1e-6f,
+               "audio batches must use 50 percent sequential probability");
     expectNear(config.upshiftProbabilityScale, 0.50f, 1e-6f,
                "the shipped upshift probability scale must be 50 percent");
     expectNear(config.downshiftProbabilityScale, 1.0f, 1e-6f,
@@ -213,13 +217,16 @@ void testShippedConfiguration(const char* sourceDirectory) {
     AudioBank audioBank;
     expect(audioBank.loadManifest((root + "/config/BackfireAudio.ini").c_str(),
                                   &error),
-           "the shipped twelve-slot audio manifest must load");
+           "the shipped sixteen-slot audio manifest must load");
     expect(std::string(audioBank.assetId(0)) ==
                 "audio/backfire/g1_01.wav",
            "the first flat audio slot must map to the first WAV");
     expect(std::string(audioBank.assetId(11)) ==
                 "audio/backfire/g4_03.wav",
-           "the last flat audio slot must map to the twelfth WAV");
+           "the twelfth flat audio slot must retain its mapping");
+    expect(std::string(audioBank.assetId(15)) ==
+                "audio/backfire/g5_04.wav",
+           "the last flat audio slot must map to the sixteenth WAV");
 
     const std::string firstAsset = audioBank.assetId(0);
     expect(!audioBank.loadManifest(
@@ -250,7 +257,6 @@ void testMarkerGate() {
     snapshot.driverControlsValid = true;
     controller.tick(&snapshot, 1, 0);
     snapshot.shiftEvent = true;
-    snapshot.nitrousActive = true;
     snapshot.gear = 2;
     controller.tick(&snapshot, 1, 1);
     controller.tick(&snapshot, 1, 600);
@@ -277,7 +283,6 @@ void testGlobalMinimumRpmGate() {
     floor.driverControlsValid = true;
     floorController.tick(&floor, 1, 0);
     floor.shiftEvent = true;
-    floor.nitrousActive = true;
     floor.gear = 2;
     floorController.tick(&floor, 1, 10);
     floor.shiftEvent = false;
@@ -285,7 +290,7 @@ void testGlobalMinimumRpmGate() {
     expect(floorBridge.flames.empty(),
            "4000 RPM must block shift and sustained flames globally");
     expect(floorBridge.audio.empty(),
-           "4000 RPM must block bound and NOS backfire audio globally");
+           "4000 RPM must block backfire audio globally");
 
     RecordingBridge aboveBridge;
     ExhaustController aboveController(aboveBridge, config);
@@ -475,7 +480,9 @@ void testFlameAudioProbabilityIsIndependent() {
     silentConfig.pairedShiftMode = true;
     silentConfig.shiftSimultaneousProbability = 1.0f;
     silentConfig.shiftSequentialProbability = 0.0f;
-    silentConfig.flameAudioProbability = 0.0f;
+    silentConfig.upshiftFlameAudioProbability = 0.0f;
+    silentConfig.downshiftFlameAudioProbability = 0.0f;
+    silentConfig.sustainedFlameAudioProbability = 0.0f;
     ExhaustController silent(silentBridge, silentConfig);
     silent.tick(&snapshot, 1, 0);
     snapshot.shiftEvent = true;
@@ -489,7 +496,9 @@ void testFlameAudioProbabilityIsIndependent() {
     snapshot = baseSnapshot();
     RecordingBridge audibleBridge;
     ExhaustConfig audibleConfig = silentConfig;
-    audibleConfig.flameAudioProbability = 1.0f;
+    audibleConfig.upshiftFlameAudioProbability = 1.0f;
+    audibleConfig.downshiftFlameAudioProbability = 1.0f;
+    audibleConfig.sustainedFlameAudioProbability = 1.0f;
     ExhaustController audible(audibleBridge, audibleConfig);
     audible.tick(&snapshot, 1, 0);
     snapshot.shiftEvent = true;
@@ -498,36 +507,104 @@ void testFlameAudioProbabilityIsIndependent() {
     expectAudioMatchesFlames(audibleBridge);
 }
 
-void testNitrousAudioEdgesOnly() {
+void testOutletCountControlsDistinctAudioBatch() {
+    auto run = [](std::uint16_t perSide, bool sequential,
+                  std::size_t minimum, std::size_t maximum,
+                  std::uint64_t stepMs) {
+        RecordingBridge bridge;
+        ExhaustConfig config = deterministicConfig();
+        config.pairedShiftMode = true;
+        config.shiftSimultaneousProbability = 1.0f;
+        config.shiftSequentialProbability = 0.0f;
+        config.upshiftFlameAudioProbability = 1.0f;
+        config.audioBatchSequentialProbability = sequential ? 1.0f : 0.0f;
+        ExhaustController controller(bridge, config);
+        VehicleSnapshot snapshot = baseSnapshot();
+        snapshot.leftExhaustCount = perSide;
+        snapshot.rightExhaustCount = perSide;
+
+        controller.tick(&snapshot, 1, 0);
+        snapshot.shiftEvent = true;
+        snapshot.gear = 2;
+        controller.tick(&snapshot, 1, 10);
+        snapshot.shiftEvent = false;
+        for (std::uint64_t nowMs = 60; nowMs <= 610; nowMs += 50) {
+            controller.tick(&snapshot, 1, nowMs);
+        }
+
+        expect(bridge.audio.size() >= minimum &&
+                   bridge.audio.size() <= maximum,
+               "outlet tier must constrain audio batch size");
+        const std::uint32_t sequenceId = bridge.audio.empty()
+                                             ? 0u
+                                             : bridge.audio.front().sequenceId;
+        expect(sequenceId != 0,
+               "an audio batch must carry its flame sequence ID");
+        for (std::size_t i = 0; i < bridge.audio.size(); ++i) {
+            expect(bridge.audio[i].sequenceId == sequenceId,
+                   "all cues in one audio batch must share one sequence ID");
+            expect(bridge.audio[i].cue.clipIndex < AudioBank::kClipCount,
+                   "every batch cue must independently select one of 16 clips");
+            if (i != 0) {
+                const std::uint64_t difference =
+                    bridge.audio[i].scheduledAtMs -
+                    bridge.audio[i - 1].scheduledAtMs;
+                expect(difference == (sequential ? stepMs : 0u),
+                       "audio batch spacing must match its outlet tier");
+            }
+        }
+    };
+
+    run(1, false, 1, 2, 300);
+    run(1, true, 1, 2, 300);
+    run(2, false, 2, 4, 200);
+    run(2, true, 2, 4, 200);
+    run(3, false, 3, 6, 100);
+    run(3, true, 3, 6, 100);
+}
+
+void testEveryAudioCueUsesIndependentOneOfSixteenSelection() {
     RecordingBridge bridge;
     ExhaustConfig config = deterministicConfig();
-    config.nitrousStartProbability = 1.0f;
-    config.nitrousEndProbability = 1.0f;
-    config.nitrousSequentialProbability = 1.0f;
-    config.pairedSideDelayMs = 100;
+    config.pairedShiftMode = true;
+    config.shiftSimultaneousProbability = 1.0f;
+    config.shiftSequentialProbability = 0.0f;
+    config.pairedDownshiftProbability = 1.0f;
+    config.audioBatchSequentialProbability = 0.0f;
     ExhaustController controller(bridge, config);
     VehicleSnapshot snapshot = baseSnapshot();
-    snapshot.driverControlsValid = true;
+    snapshot.leftExhaustCount = 1;
+    snapshot.rightExhaustCount = 1;
 
     controller.tick(&snapshot, 1, 0);
-    snapshot.nitrousActive = true;
-    controller.tick(&snapshot, 1, 10);
-    expect(bridge.audio.size() == 1,
-           "NOS activation must emit the first audio side once");
-    controller.tick(&snapshot, 1, 110);
-    expect(bridge.audio.size() == 2,
-           "NOS activation may emit the second side after 100 ms");
-    controller.tick(&snapshot, 1, 500);
-    expect(bridge.audio.size() == 2,
-           "holding NOS must not repeat activation audio");
-    expect(bridge.flames.empty(),
-           "NOS edge audio must not create exhaust backfire flames");
-
-    snapshot.nitrousActive = false;
-    controller.tick(&snapshot, 1, 600);
-    controller.tick(&snapshot, 1, 700);
-    expect(bridge.audio.size() == 4,
-           "NOS release must schedule one left and one right audio cue");
+    for (std::uint64_t step = 1; step <= 512; ++step) {
+        const std::uint64_t nowMs = step * 10u;
+        snapshot.shiftEvent = true;
+        snapshot.gear = snapshot.gear == 1 ? 2 : 1;
+        controller.tick(&snapshot, 1, nowMs);
+        snapshot.shiftEvent = false;
+        controller.tick(&snapshot, 1, nowMs + 1u);
+    }
+    expect(bridge.audio.size() >= 512,
+           "independent-selection test must emit enough audio cues");
+    std::array<bool, AudioBank::kClipCount> seen{};
+    bool repeatedConsecutively = false;
+    for (std::size_t index = 0; index < bridge.audio.size(); ++index) {
+        const std::uint8_t clip = bridge.audio[index].cue.clipIndex;
+        expect(clip < AudioBank::kClipCount,
+               "independent selection must stay inside the 16-slot bank");
+        seen[clip] = true;
+        if (index != 0 &&
+            bridge.audio[index - 1].cue.clipIndex == clip) {
+            repeatedConsecutively = true;
+        }
+    }
+    expect(std::all_of(seen.begin(), seen.end(), [](bool value) {
+               return value;
+           }),
+           "independent 1/16 selection must make every clip reachable");
+    expect(repeatedConsecutively,
+           "independent 1/16 selection must allow consecutive repeats");
 }
 
 void testPairedDownshiftUsesGlobalRpmGateAndFixedProbability() {
@@ -1117,7 +1194,8 @@ int main(int argc, char** argv) {
         testPairedShiftPatterns();
         testPairedDownshiftUsesGlobalRpmGateAndFixedProbability();
         testFlameAudioProbabilityIsIndependent();
-        testNitrousAudioEdgesOnly();
+        testOutletCountControlsDistinctAudioBatch();
+        testEveryAudioCueUsesIndependentOneOfSixteenSelection();
         testShiftUsesPreShiftRpm();
         testDownshiftRpmThreshold();
         testDownshiftUsesReducedBurstDensity();

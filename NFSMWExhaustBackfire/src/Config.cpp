@@ -66,38 +66,39 @@ void ExhaustConfig::normalize() noexcept {
     sustainedLimitRatio =
         std::clamp(sustainedLimitRatio, nearLimitRatio, 1.0f);
 
-    if (!std::isfinite(sustainedProbability)) sustainedProbability = 0.20f;
+    if (!std::isfinite(sustainedProbability)) sustainedProbability = 0.40f;
     if (!std::isfinite(neutralSustainedProbability)) {
-        neutralSustainedProbability = 0.45f;
+        neutralSustainedProbability = 0.70f;
     }
     if (!std::isfinite(neutralMinGasInput)) neutralMinGasInput = 0.25f;
-    if (!std::isfinite(flameAudioProbability)) {
-        flameAudioProbability = 0.30f;
-    }
+    if (!std::isfinite(upshiftFlameAudioProbability))
+        upshiftFlameAudioProbability = 0.50f;
+    if (!std::isfinite(downshiftFlameAudioProbability))
+        downshiftFlameAudioProbability = 0.70f;
+    if (!std::isfinite(sustainedFlameAudioProbability))
+        sustainedFlameAudioProbability = 0.30f;
     if (!std::isfinite(shiftSimultaneousProbability)) {
-        shiftSimultaneousProbability = 0.225f;
+        shiftSimultaneousProbability = 0.3375f;
     }
     if (!std::isfinite(shiftSequentialProbability)) {
-        shiftSequentialProbability = 0.175f;
+        shiftSequentialProbability = 0.2625f;
     }
     if (!std::isfinite(pairedDownshiftProbability)) {
         pairedDownshiftProbability = 0.80f;
     }
-    if (!std::isfinite(nitrousStartProbability)) {
-        nitrousStartProbability = 0.30f;
-    }
-    if (!std::isfinite(nitrousEndProbability)) {
-        nitrousEndProbability = 0.35f;
-    }
-    if (!std::isfinite(nitrousSequentialProbability)) {
-        nitrousSequentialProbability = 0.50f;
+    if (!std::isfinite(audioBatchSequentialProbability)) {
+        audioBatchSequentialProbability = 0.50f;
     }
     sustainedProbability = std::clamp(sustainedProbability, 0.0f, 1.0f);
     neutralSustainedProbability =
         std::clamp(neutralSustainedProbability, 0.0f, 1.0f);
     neutralMinGasInput = std::clamp(neutralMinGasInput, 0.0f, 1.0f);
-    flameAudioProbability =
-        std::clamp(flameAudioProbability, 0.0f, 1.0f);
+    upshiftFlameAudioProbability =
+        std::clamp(upshiftFlameAudioProbability, 0.0f, 1.0f);
+    downshiftFlameAudioProbability =
+        std::clamp(downshiftFlameAudioProbability, 0.0f, 1.0f);
+    sustainedFlameAudioProbability =
+        std::clamp(sustainedFlameAudioProbability, 0.0f, 1.0f);
     shiftSimultaneousProbability =
         std::clamp(shiftSimultaneousProbability, 0.0f, 1.0f);
     shiftSequentialProbability = std::clamp(
@@ -105,12 +106,8 @@ void ExhaustConfig::normalize() noexcept {
     pairedDownshiftProbability =
         std::clamp(pairedDownshiftProbability, 0.0f, 1.0f);
     pairedSideDelayMs = std::clamp(pairedSideDelayMs, 1u, 5000u);
-    nitrousStartProbability =
-        std::clamp(nitrousStartProbability, 0.0f, 1.0f);
-    nitrousEndProbability =
-        std::clamp(nitrousEndProbability, 0.0f, 1.0f);
-    nitrousSequentialProbability =
-        std::clamp(nitrousSequentialProbability, 0.0f, 1.0f);
+    audioBatchSequentialProbability =
+        std::clamp(audioBatchSequentialProbability, 0.0f, 1.0f);
 
     if (effectId.empty()) effectId = "exhaust_backfire";
     if (effectId.size() > 127u) effectId.resize(127u);

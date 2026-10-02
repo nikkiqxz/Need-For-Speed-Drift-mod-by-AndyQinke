@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(NFSMWExhaustBackfire VERSION 1.1.16 LANGUAGES C CXX)
+project(NFSMWExhaustBackfire VERSION 1.1.46 LANGUAGES C CXX)
 
 if(MSVC)
     # The ASI is injected into a 2005 process; keep the package independent
@@ -73,6 +73,7 @@ if(NFSMW_EXHAUST_BUILD_NATIVE_ADAPTER)
         src/NativeLog.cpp
         src/StartupGate.cpp
         src/SunSetLighting.cpp
+        src/VehicleTone.cpp
         "${NFSMW_MINHOOK_DIR}/src/buffer.c"
         "${NFSMW_MINHOOK_DIR}/src/hook.c"
         "${NFSMW_MINHOOK_DIR}/src/trampoline.c"
@@ -89,8 +90,6 @@ if(NFSMW_EXHAUST_BUILD_NATIVE_ADAPTER)
         nfsmw_exhaust_api
         advapi32
         crypt32
-        ole32
-        xaudio2
     )
     target_compile_features(nfsmw_exhaust_native PRIVATE cxx_std_17)
     target_compile_definitions(nfsmw_exhaust_native PRIVATE
@@ -127,19 +126,21 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
-    add_executable(nfsmw_exhaust_nitrous_activity_tests
-        tests/NitrousActivityTests.cpp
+    add_executable(nfsmw_exhaust_vehicle_tone_tests
+        tests/VehicleToneTests.cpp
+        src/VehicleTone.cpp
     )
-    target_include_directories(nfsmw_exhaust_nitrous_activity_tests PRIVATE
+    target_include_directories(nfsmw_exhaust_vehicle_tone_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    target_compile_features(nfsmw_exhaust_nitrous_activity_tests PRIVATE
+    target_compile_features(nfsmw_exhaust_vehicle_tone_tests PRIVATE
         cxx_std_17)
     if(MSVC)
-        target_compile_options(nfsmw_exhaust_nitrous_activity_tests PRIVATE
+        target_compile_options(nfsmw_exhaust_vehicle_tone_tests PRIVATE
             /W4 /EHsc)
     endif()
-    add_test(NAME nfsmw_exhaust_nitrous_activity
-             COMMAND nfsmw_exhaust_nitrous_activity_tests)
+    add_test(NAME nfsmw_exhaust_vehicle_tone
+             COMMAND nfsmw_exhaust_vehicle_tone_tests
+                     "${CMAKE_CURRENT_SOURCE_DIR}")
 
     add_executable(nfsmw_exhaust_tests
         tests/ExhaustControllerTests.cpp
@@ -219,8 +220,7 @@ if(BUILD_TESTING)
             target_include_directories(nfsmw_exhaust_native_audio_tests PRIVATE
                 ${CMAKE_CURRENT_SOURCE_DIR}/src)
             target_link_libraries(nfsmw_exhaust_native_audio_tests PRIVATE
-                ole32
-                xaudio2)
+                nfsmw_exhaust_core)
             target_compile_features(nfsmw_exhaust_native_audio_tests PRIVATE
                 cxx_std_17)
             if(MSVC)

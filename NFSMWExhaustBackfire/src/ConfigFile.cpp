@@ -3,6 +3,7 @@
 #include <cctype>
 #include <cerrno>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <limits>
 #include <utility>
@@ -19,6 +20,16 @@ std::string trim(std::string value) {
         value.pop_back();
     }
     return value;
+}
+
+bool equalIgnoreCase(const std::string& left, const char* right) {
+    if (right == nullptr || left.size() != std::strlen(right)) return false;
+    for (std::size_t index = 0; index < left.size(); ++index) {
+        const unsigned char a = static_cast<unsigned char>(left[index]);
+        const unsigned char b = static_cast<unsigned char>(right[index]);
+        if (std::tolower(a) != std::tolower(b)) return false;
+    }
+    return true;
 }
 
 bool parseUnsigned(const std::string& value, std::uint32_t* output) {
@@ -119,9 +130,15 @@ bool setValue(const std::string& key, const std::string& value,
     } else if (key == "neutral_min_gas_input" &&
                parseFloat(value, &decimal)) {
         config->neutralMinGasInput = decimal;
-    } else if (key == "flame_audio_probability" &&
+    } else if (key == "upshift_flame_audio_probability" &&
                parseFloat(value, &decimal)) {
-        config->flameAudioProbability = decimal;
+        config->upshiftFlameAudioProbability = decimal;
+    } else if (key == "downshift_flame_audio_probability" &&
+               parseFloat(value, &decimal)) {
+        config->downshiftFlameAudioProbability = decimal;
+    } else if (key == "sustained_flame_audio_probability" &&
+               parseFloat(value, &decimal)) {
+        config->sustainedFlameAudioProbability = decimal;
     } else if (key == "paired_shift_mode" && parseBool(value, &flag)) {
         config->pairedShiftMode = flag;
     } else if (key == "shift_simultaneous_probability" &&
@@ -136,15 +153,9 @@ bool setValue(const std::string& key, const std::string& value,
     } else if (key == "paired_side_delay_ms" &&
                parseUnsigned(value, &integer)) {
         config->pairedSideDelayMs = integer;
-    } else if (key == "nitrous_start_probability" &&
+    } else if (key == "audio_batch_sequential_probability" &&
                parseFloat(value, &decimal)) {
-        config->nitrousStartProbability = decimal;
-    } else if (key == "nitrous_end_probability" &&
-               parseFloat(value, &decimal)) {
-        config->nitrousEndProbability = decimal;
-    } else if (key == "nitrous_sequential_probability" &&
-               parseFloat(value, &decimal)) {
-        config->nitrousSequentialProbability = decimal;
+        config->audioBatchSequentialProbability = decimal;
     } else if (key == "require_both_markers" && parseBool(value, &flag)) {
         config->requireBothMarkers = flag;
     } else if (key == "suppress_vanilla" && parseBool(value, &flag)) {
@@ -182,12 +193,25 @@ bool loadConfigFile(const char* path, ExhaustConfig* config,
     ExhaustConfig candidate = *config;
     std::string line;
     std::size_t lineNumber = 0;
+    bool inNativeOnlySection = false;
     while (std::getline(input, line)) {
         ++lineNumber;
         const std::size_t comment = line.find_first_of("#;");
         if (comment != std::string::npos) line.erase(comment);
         line = trim(line);
-        if (line.empty() || line.front() == '[') continue;
+        if (line.empty()) continue;
+        if (line.front() == '[') {
+            const std::size_t close = line.find(']');
+            const std::string section = close == std::string::npos
+                ? std::string{}
+                : trim(line.substr(1, close - 1));
+            inNativeOnlySection =
+                equalIgnoreCase(section, "BackfireToneByVehicle") ||
+                equalIgnoreCase(section, "BackfireToneVariation") ||
+                equalIgnoreCase(section, "ExhaustSmoke");
+            continue;
+        }
+        if (inNativeOnlySection) continue;
 
         const std::size_t equals = line.find('=');
         if (equals == std::string::npos) {

@@ -19,6 +19,7 @@ struct AdapterState {
     std::uint8_t lastFlameSide = 0xFFu;
     std::uint8_t lastFlamePattern = 0xFFu;
     std::uint32_t lastSequenceId = 0;
+    std::uint32_t lastAudioSequenceId = 0;
     std::string lastAssetId;
 };
 
@@ -63,6 +64,7 @@ void NFSW_EXHAUST_CALL playAudio(
     if (user == nullptr || request == nullptr) return;
     auto* state = static_cast<AdapterState*>(user);
     ++state->audio;
+    state->lastAudioSequenceId = request->sequenceId;
     const bool left = request->side == NFSW_EXHAUST_SIDE_LEFT;
     const bool right = request->side == NFSW_EXHAUST_SIDE_RIGHT;
     const bool orientationMatches =
@@ -153,6 +155,8 @@ int main(int argc, char** argv) {
                "C API must expose the loaded audio asset IDs");
         expect(state.requestSideAndOrientationValid,
                "C API must preserve marker orientation and exhaust side");
+        expect(state.lastAudioSequenceId != 0,
+               "C API must preserve the audio batch sequence ID");
         expect(!state.lastVanillaEnabled,
                "C API must request vanilla exhaust suppression");
 
@@ -182,7 +186,7 @@ int main(int argc, char** argv) {
         NFSW_Exhaust_OnFrame(523);
         expect(state.vanillaCalls == callsAfterShutdown,
                "shutdown must stop frame processing and release callbacks");
-        expect(std::string(NFSW_Exhaust_Version()) == "1.1.16",
+        expect(std::string(NFSW_Exhaust_Version()) == "1.1.46",
                "C API version must match the release");
     } catch (const std::exception& error) {
         std::cerr << "NFSMWExhaustBackfire API tests failed: " << error.what()

@@ -54,7 +54,7 @@ void NFSW_EXHAUST_CALL setVanilla(void* user, std::uint32_t vehicleId,
     (void)adapter;
     (void)vehicleId;
     (void)enabled;
-    // TODO: suppress the stock EXHAUST backfire request only, never NOS.
+    // TODO: suppress the stock exhaust-backfire request only.
 }
 
 void NFSW_EXHAUST_CALL logMessage(void* user, const char* message) {

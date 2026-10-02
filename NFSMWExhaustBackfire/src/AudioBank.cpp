@@ -40,7 +40,9 @@ AudioBank::AudioBank()
           "backfire.clip01", "backfire.clip02", "backfire.clip03",
           "backfire.clip04", "backfire.clip05", "backfire.clip06",
           "backfire.clip07", "backfire.clip08", "backfire.clip09",
-          "backfire.clip10", "backfire.clip11", "backfire.clip12"} {}
+          "backfire.clip10", "backfire.clip11", "backfire.clip12",
+          "backfire.clip13", "backfire.clip14", "backfire.clip15",
+          "backfire.clip16"} {}
 
 const char* AudioBank::assetId(std::size_t clipIndex) const noexcept {
     if (clipIndex >= kClipCount) return nullptr;
@@ -104,7 +106,7 @@ bool AudioBank::loadManifest(const char* path, std::string* error) {
 
     if (std::find(seen.begin(), seen.end(), false) != seen.end()) {
         if (error != nullptr) {
-            *error = "audio manifest must define all 12 flat clip slots";
+            *error = "audio manifest must define all 16 flat clip slots";
         }
         return false;
     }

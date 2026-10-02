@@ -16,7 +16,7 @@ namespace nfsmw_exhaust {
  */
 class AudioBank {
 public:
-    static constexpr std::size_t kClipCount = 12;
+    static constexpr std::size_t kClipCount = 16;
 
     AudioBank();
 

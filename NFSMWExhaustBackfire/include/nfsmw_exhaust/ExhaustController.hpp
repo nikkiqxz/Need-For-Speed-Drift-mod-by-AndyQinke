@@ -5,8 +5,10 @@
 #include "IGameBridge.hpp"
 #include "Types.hpp"
 
+#include <array>
 #include <cstdint>
 #include <cstddef>
+#include <deque>
 #include <memory>
 #include <random>
 #include <unordered_map>
@@ -57,11 +59,19 @@ private:
             bool fixedSide = false;
             FlamePattern pattern = FlamePattern::Standalone;
             std::uint32_t sequenceId = 0;
+            float audioProbability = 0.0f;
         };
 
         struct ScheduledAudio {
             std::uint64_t dueMs = 0;
             ExhaustSide side = ExhaustSide::Left;
+            std::uint8_t clipIndex = 0;
+            std::uint32_t sequenceId = 0;
+        };
+
+        struct AudioBatchSequence {
+            std::uint32_t sequenceId = 0;
+            std::uint64_t expiresAtMs = 0;
         };
 
         bool initialized = false;
@@ -76,13 +86,11 @@ private:
         bool shiftCycleHandled = false;
         std::uint64_t highSinceMs = 0;
         std::uint64_t nextSustainedAtMs = 0;
-        bool nitrousStateValid = false;
-        bool previousNitrousActive = false;
-
         bool burstActive = false;
         std::vector<ScheduledShot> burstShots;
         std::size_t burstIndex = 0;
-        std::vector<ScheduledAudio> nitrousAudio;
+        std::deque<ScheduledAudio> pendingAudio;
+        std::deque<AudioBatchSequence> audioBatchSequences;
 
         bool hasEmitted = false;
         std::uint64_t lastEmissionMs = 0;
@@ -103,28 +111,34 @@ private:
                     std::uint64_t nowMs);
     void startPairedShift(VehicleState& state, std::uint64_t nowMs,
                           VehicleState::PairedPattern pattern);
-    void startNitrousAudio(VehicleState& state,
-                           const VehicleSnapshot& snapshot,
-                           std::uint64_t nowMs, bool starting);
     void serviceBurst(VehicleState& state, const VehicleSnapshot& snapshot,
                       std::uint64_t nowMs);
     void serviceSustained(VehicleState& state,
                           const VehicleSnapshot& snapshot,
                           std::uint64_t nowMs);
-    void serviceNitrousAudio(VehicleState& state,
+    void servicePendingAudio(VehicleState& state,
                              const VehicleSnapshot& snapshot,
                              std::uint64_t nowMs);
     bool emitOne(VehicleState& state, const VehicleSnapshot& snapshot,
                  ExhaustSide side, std::uint64_t scheduledAtMs,
                  std::uint64_t nowMs,
                  FlamePattern pattern = FlamePattern::Standalone,
-                 std::uint32_t sequenceId = 0);
+                 std::uint32_t sequenceId = 0,
+                 float audioProbability = 0.0f);
     bool shouldTrigger(const VehicleSnapshot& snapshot);
     bool shouldTrigger(const VehicleSnapshot& snapshot,
                        ShiftDirection direction);
     bool shouldTrigger(float probability);
     VehicleState::PairedPattern chooseShiftPattern(float eventProbability);
+    void scheduleAudioBatch(VehicleState& state,
+                            const VehicleSnapshot& snapshot,
+                            std::uint32_t sequenceId,
+                            ExhaustSide preferredSide,
+                            std::uint64_t scheduledAtMs,
+                            std::uint64_t nowMs);
     void emitAudio(const VehicleSnapshot& snapshot, ExhaustSide side,
+                   std::uint8_t clipIndex,
+                   std::uint32_t sequenceId,
                    std::uint64_t scheduledAtMs, std::uint64_t nowMs);
     bool isNearLimit(const VehicleSnapshot& snapshot) const noexcept;
     bool isAtDownshiftRpm(
@@ -132,6 +146,7 @@ private:
     bool isAtSustainedLimit(
         const VehicleSnapshot& snapshot) const noexcept;
     ExhaustSide chooseSide(const VehicleSnapshot& snapshot);
+    std::uint8_t drawAudioClip();
     std::uint32_t nextRandom();
     std::uint32_t randomBetween(std::uint32_t min, std::uint32_t max);
 

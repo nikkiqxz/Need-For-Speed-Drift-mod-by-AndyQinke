@@ -70,13 +70,24 @@ struct VehicleSnapshot {
     float gasInput = 0.0f;
     float brakeInput = 0.0f;
     float handBrakeInput = 0.0f;
-    bool nitrousActive = false;
 
     ExhaustMarker leftExhaust{};
     ExhaustMarker rightExhaust{};
+    std::uint16_t leftExhaustCount = 0;
+    std::uint16_t rightExhaustCount = 0;
 
     bool hasBothExhaustMarkers() const noexcept {
         return leftExhaust.present && rightExhaust.present;
+    }
+
+    std::uint16_t exhaustOutletCount() const noexcept {
+        const std::uint16_t left = leftExhaustCount != 0
+                                       ? leftExhaustCount
+                                       : (leftExhaust.present ? 1u : 0u);
+        const std::uint16_t right = rightExhaustCount != 0
+                                        ? rightExhaustCount
+                                        : (rightExhaust.present ? 1u : 0u);
+        return static_cast<std::uint16_t>(left + right);
     }
 };
 
@@ -101,6 +112,7 @@ struct AudioRequest {
     VehicleId vehicleId = 0;
     std::uint64_t scheduledAtMs = 0;
     std::uint64_t emittedAtMs = 0;
+    std::uint32_t sequenceId = 0;
     ExhaustSide side = ExhaustSide::Left;
     ExhaustMarker marker{};
     AudioCue cue{};

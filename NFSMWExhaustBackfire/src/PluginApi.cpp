@@ -71,6 +71,7 @@ public:
         raw.marker = toC(request.marker);
         raw.clipIndex = request.cue.clipIndex;
         raw.side = static_cast<std::uint8_t>(request.side);
+        raw.sequenceId = request.sequenceId;
         raw.assetId = request.cue.assetId;
         callbacks_.playAudio(callbacks_.user, &raw);
     }
@@ -132,7 +133,8 @@ private:
         snapshot.gasInput = raw.gasInput;
         snapshot.brakeInput = raw.brakeInput;
         snapshot.handBrakeInput = raw.handBrakeInput;
-        snapshot.nitrousActive = raw.nitrousActive != 0;
+        snapshot.leftExhaustCount = raw.leftExhaustCount;
+        snapshot.rightExhaustCount = raw.rightExhaustCount;
         snapshot.leftExhaust = convert(raw.leftExhaust);
         snapshot.rightExhaust = convert(raw.rightExhaust);
         return snapshot;
@@ -278,5 +280,5 @@ NFSW_Exhaust_Shutdown() {
 
 extern "C" NFSW_EXHAUST_EXPORT const char* NFSW_EXHAUST_CALL
 NFSW_Exhaust_Version() {
-    return "1.1.16";
+    return "1.1.46";
 }

@@ -28,20 +28,20 @@ struct ExhaustConfig {
     float downshiftMinRpmRatio = 0.70f;
     float downshiftMinControlInput = 0.05f;
     float sustainedLimitRatio = 0.995f;
-    float sustainedProbability = 0.20f;
-    float neutralSustainedProbability = 0.45f;
+    float sustainedProbability = 0.40f;
+    float neutralSustainedProbability = 0.70f;
     float neutralMinGasInput = 0.25f;
-    float flameAudioProbability = 0.30f;
+    float upshiftFlameAudioProbability = 0.50f;
+    float downshiftFlameAudioProbability = 0.70f;
+    float sustainedFlameAudioProbability = 0.30f;
 
     bool pairedShiftMode = true;
-    float shiftSimultaneousProbability = 0.225f;
-    float shiftSequentialProbability = 0.175f;
+    float shiftSimultaneousProbability = 0.3375f;
+    float shiftSequentialProbability = 0.2625f;
     float pairedDownshiftProbability = 0.80f;
     std::uint32_t pairedSideDelayMs = 300;
 
-    float nitrousStartProbability = 0.30f;
-    float nitrousEndProbability = 0.35f;
-    float nitrousSequentialProbability = 0.50f;
+    float audioBatchSequentialProbability = 0.50f;
 
     bool requireBothMarkers = true;
     bool suppressVanilla = true;

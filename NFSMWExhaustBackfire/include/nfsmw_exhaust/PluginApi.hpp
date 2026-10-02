@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define NFSW_EXHAUST_API_VERSION 6u
+#define NFSW_EXHAUST_API_VERSION 9u
 
 #define NFSW_EXHAUST_SIDE_LEFT 0u
 #define NFSW_EXHAUST_SIDE_RIGHT 1u
@@ -62,7 +62,8 @@ typedef struct NfswExhaustVehicleSnapshotC {
     float gasInput;
     float brakeInput;
     float handBrakeInput;
-    int nitrousActive;
+    uint16_t leftExhaustCount;
+    uint16_t rightExhaustCount;
     NfswExhaustMarkerC leftExhaust;
     NfswExhaustMarkerC rightExhaust;
 } NfswExhaustVehicleSnapshotC;
@@ -87,12 +88,14 @@ typedef struct NfswExhaustAudioRequestC {
     uint64_t scheduledAtMs;
     uint64_t emittedAtMs;
     NfswExhaustMarkerC marker;
-    /* Zero-based flat slot: 0..11, selected uniformly in one draw. */
+    /* Zero-based flat slot: 0..15. Each cue is an independent draw. */
     uint8_t clipIndex;
     uint8_t reserved0;
     /* NFSW_EXHAUST_SIDE_LEFT or NFSW_EXHAUST_SIDE_RIGHT. */
     uint8_t side;
-    uint8_t reserved[5];
+    uint8_t reserved1;
+    /* All cues created by the same flame event share this non-zero ID. */
+    uint32_t sequenceId;
     const char* assetId;
 } NfswExhaustAudioRequestC;
 
@@ -174,6 +177,8 @@ static_assert(offsetof(NfswExhaustAudioRequestC, clipIndex) == 56,
               "unexpected audio clip ABI layout");
 static_assert(offsetof(NfswExhaustAudioRequestC, side) == 58,
               "unexpected audio side ABI layout");
+static_assert(offsetof(NfswExhaustAudioRequestC, sequenceId) == 60,
+              "unexpected audio sequence ABI layout");
 static_assert(offsetof(NfswExhaustAudioRequestC, assetId) == 64,
               "unexpected audio asset ABI layout");
 static_assert(offsetof(NfswExhaustCallbacks, user) == 8,

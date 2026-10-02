@@ -1,8 +1,8 @@
 #include "NativeAudio.hpp"
 #include "NativeLog.hpp"
-#include "NitrousActivity.hpp"
 #include "StartupGate.hpp"
 #include "SunSetLighting.hpp"
+#include "VehicleTone.hpp"
 #include "nfsmw_exhaust/PluginApi.hpp"
 #include "nfsmw_exhaust/Types.hpp"
 
@@ -11,10 +11,13 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <string>
 
 namespace {
 
@@ -32,6 +35,14 @@ constexpr std::uintptr_t kCarRenderConnHandleFxEvent = 0x00739070u;
 constexpr std::uintptr_t kEmitOneShot = 0x00744980u;
 constexpr std::uintptr_t kUpdateEmitter = 0x00744A50u;
 constexpr std::uintptr_t kAttributeLookup = 0x00454810u;
+constexpr std::uintptr_t kGamePcmRender = 0x0082049Eu;
+constexpr std::uintptr_t kIsPaused = 0x00468390u;
+constexpr std::uintptr_t kGameFlowState = 0x00925E90u;
+constexpr std::uintptr_t kIsInNis = 0x0091606Cu;
+constexpr std::uintptr_t kWindowHasLostFocus = 0x00982C50u;
+constexpr std::uintptr_t kGameAudioSampleRate = 0x009C2046u;
+constexpr std::uintptr_t kGameAudioFrontChannels = 0x009C205Fu;
+constexpr std::uintptr_t kGameAudioRearChannels = 0x009C2060u;
 constexpr std::uintptr_t kVehicleTable = 0x009352B0u;
 constexpr std::uintptr_t kPVehicleVtable = 0x008AA9D8u;
 constexpr std::uintptr_t kEngineVtable = 0x008AB6E0u;
@@ -47,10 +58,14 @@ constexpr std::uintptr_t kGetPositionMarker = 0x005016D0u;
 constexpr std::uint32_t kLeftExhaustHash = 0xBCF8A18Bu;
 constexpr std::uint32_t kRightExhaustHash = 0xBD7CF15Eu;
 constexpr std::uint32_t kContinuousBackfireEffectAttributeHash = 0x60CEC115u;
+// bStringHash("fxcar_backfire_smoke_soft_v3"), installed by the bundled NFSMS.
+constexpr std::uint32_t kPluginSmokeEffectKey = 0x000D5FB6u;
 constexpr std::uint32_t kEmitterTimeStepBits = 0x3C088889u;
 constexpr std::uint64_t kPluginFlamePulseMs = 770u;
+constexpr std::uint64_t kPluginFlameAudioLeadMs = 100u;
 constexpr std::uint64_t kMultiOutletStepMs = 300u;
 constexpr float kPluginFlameIntensity = 1.0f;
+constexpr std::uint32_t kGameFlowRacing = 6u;
 
 constexpr std::uint32_t kSunSetTimestamp1152 = 0x6A4A2A2Eu;
 constexpr std::uint32_t kSunSetImageSize1152 = 0x00041000u;
@@ -66,18 +81,27 @@ constexpr std::size_t kEngineOffset = 0xF4u;
 constexpr std::size_t kInputOffset = 0xE8u;
 constexpr std::size_t kTransmissionOffset = 0xFCu;
 constexpr std::size_t kRenderableOffset = 0x108u;
+constexpr std::size_t kPVehicleAttributeCollectionOffset = 0xD4u;
+constexpr std::size_t kAttributeCollectionParentOffset = 0x10u;
+constexpr std::size_t kAttributeCollectionKeyOffset = 0x20u;
+constexpr std::uint32_t kMaximumAttributeParentDepth = 16u;
 // Slot zero in the verified PVehicle table is the local player's vehicle.
 // Ignore every other slot so AI cars stay entirely on the stock exhaust path.
 constexpr std::size_t kTrackedVehicleSlots = 1u;
 constexpr std::size_t kTrackedConnections = 1u;
 constexpr std::size_t kMaxExhaustMarkers = 16u;
-constexpr std::size_t kMaxNitrousEmitters = 16u;
 constexpr std::uint64_t kStatusLogIntervalMs = 1000u;
 constexpr std::uintptr_t kCarRenderConnVtable = 0x008B5254u;
 
 constexpr std::array<std::uint8_t, 16> kGameFrameTickBytes{{
     0xE8, 0x0B, 0x91, 0xDF, 0xFF, 0xE8, 0x16, 0x39,
     0x00, 0x00, 0xDB, 0x44, 0x24, 0x04, 0x51, 0xD8}};
+constexpr std::array<std::uint8_t, 16> kGamePcmRenderBytes{{
+    0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x08, 0x8B, 0x00,
+    0x57, 0x8B, 0x7D, 0x0C, 0x85, 0xFF, 0x89, 0x45}};
+constexpr std::array<std::uint8_t, 10> kIsPausedBytes{{
+    0xB9, 0x70, 0x5E, 0x92, 0x00,
+    0xE9, 0xE6, 0x32, 0x1E, 0x00}};
 constexpr std::array<std::uint8_t, 16> kCarRenderConnOnLoadedBytes{{
     0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0, 0x83, 0xEC,
     0x54, 0x53, 0x56, 0x57, 0x8B, 0x7D, 0x08, 0x8B}};
@@ -142,7 +166,7 @@ struct DriverControlsData {
     float brake;
     float handBrake;
     std::uint8_t actionButton;
-    std::uint8_t nitrous;
+    std::uint8_t reserved;
     std::uint8_t padding[2];
 };
 static_assert(sizeof(DriverControlsData) == 0x24,
@@ -176,19 +200,26 @@ struct ConnectionRecord {
     std::array<void*, kMaxExhaustMarkers> emitters{};
     std::array<std::uint32_t, kMaxExhaustMarkers> markerHashes{};
     std::array<std::array<float, 3>, kMaxExhaustMarkers> markerPositions{};
+#if NFSMW_EXHAUST_ENABLE_LOGGING
     std::array<std::uint32_t, kMaxExhaustMarkers> lastUpdateEffectKeys{};
     std::array<std::uint32_t, kMaxExhaustMarkers> lastStoredEffectKeys{};
     std::array<void*, kMaxExhaustMarkers> lastParticleInstances{};
     std::array<bool, kMaxExhaustMarkers> updateObserved{};
+#endif
     std::array<std::uint64_t, kMaxExhaustMarkers> pluginPulseStartMs{};
     std::array<std::uint64_t, kMaxExhaustMarkers> pluginPulseUntilMs{};
     std::array<std::uint64_t, kMaxExhaustMarkers> pluginPulseLastUpdateMs{};
     std::array<std::uint32_t, kMaxExhaustMarkers> pluginPulseEffectKeys{};
+    std::array<std::uint32_t, kMaxExhaustMarkers>
+        pluginPulseOneShotEffectKeys{};
+    std::uint32_t pluginPulseMask = 0;
+    std::uint32_t pluginPulseOneShotPendingMask = 0;
+    std::array<bool, kMaxExhaustMarkers> ownedEmitters{};
     std::array<MultiOutletSequence, 8> multiOutletSequences{};
     std::size_t emitterCount = 0;
-    std::array<void*, kMaxNitrousEmitters> nitrousEmitters{};
-    std::size_t nitrousEmitterCount = 0;
-    std::uint64_t lastNitrousUpdateMs = 0;
+    std::uint64_t emitterOwnershipFrame = 0;
+    bool emitterOwnershipCached = false;
+    bool emitterOwnershipValid = false;
     std::uint32_t generation = 0;
 };
 
@@ -209,6 +240,9 @@ struct VehicleRecord {
     bool layoutLogged = false;
     bool suppressVanillaBackfire = false;
     std::uint64_t lastLogMs = 0;
+    void* toneCollection = nullptr;
+    std::uint32_t toneCollectionKey = 0;
+    float toneCharacter = nfsmw_exhaust::vehicle_tone::kDefaultCharacter;
 };
 
 struct CachedVehicle {
@@ -218,6 +252,14 @@ struct CachedVehicle {
     float rawRpm = 0.0f;
     float rawRedline = 0.0f;
     float rawMaxRpm = 0.0f;
+    float toneCharacter = nfsmw_exhaust::vehicle_tone::kDefaultCharacter;
+};
+
+struct AudioBatchTone {
+    std::uint32_t vehicleId = 0;
+    std::uint32_t sequenceId = 0;
+    std::uint64_t expiresAtMs = 0;
+    float character = nfsmw_exhaust::vehicle_tone::kDefaultCharacter;
 };
 
 struct VehicleProbe {
@@ -253,10 +295,20 @@ std::array<ConnectionRecord, kTrackedConnections> g_connections{};
 std::uint32_t g_cachedCount = 0;
 std::uint32_t g_nextVehicleId = 1;
 std::uint32_t g_connectionGeneration = 0;
+std::uint64_t g_frameSerial = 0;
 std::uint64_t g_lastVehicleScanFailureLogMs = 0;
 std::uint32_t g_outletRandomState = 0xA53C9E17u;
+std::uint32_t g_toneRandomState = 0x6D2B79F5u;
+nfsmw_exhaust::vehicle_tone::Registry g_vehicleToneRegistry{};
+std::array<AudioBatchTone, 16> g_audioBatchTones{};
+std::atomic<bool> g_gameplayEffectsActive{false};
+bool g_exhaustSmokeEnabled = true;
+float g_exhaustSmokeIntensity = 1.15f;
 HMODULE g_pluginModule = nullptr;
 using GameFrameTickFn = void(__cdecl*)(std::uint32_t elapsedMs);
+using GamePcmRenderFn = void(__cdecl*)(std::int16_t** samples,
+                                      std::int32_t frameCount);
+using IsPausedFn = bool(__cdecl*)();
 using FloatGetterFn = float(__thiscall*)(void* object);
 using GearGetterFn = std::uint32_t(__thiscall*)(void* object);
 using BoolGetterFn = bool(__thiscall*)(void* object);
@@ -281,6 +333,7 @@ using UpdateEmitterFn = void(__thiscall*)(void* emitter, const void* parentMatri
                                          const void* velocity);
 using SunSetPopulateLightsFn = void(__cdecl*)();
 GameFrameTickFn g_originalGameFrameTick = nullptr;
+GamePcmRenderFn g_originalGamePcmRender = nullptr;
 CarRenderConnOnLoadedFn g_originalCarRenderConnOnLoaded = nullptr;
 CarRenderConnHandleFxEventFn g_originalCarRenderConnHandleFxEvent = nullptr;
 EmitOneShotFn g_originalEmitOneShot = nullptr;
@@ -293,6 +346,8 @@ std::uintptr_t g_sunSetLightCount = 0;
 std::uintptr_t g_sunSetLightBuffer = 0;
 std::uintptr_t g_sunSetWeatherLightPower = 0;
 std::uintptr_t g_sunSetExhaustLight = 0;
+std::array<nfsmw_exhaust::sunset_lighting::SpotLightModel32,
+           kSunSetLightCapacity> g_sunSetLightSnapshot{};
 
 bool isReadable(const void* address, std::size_t size) noexcept {
     if (address == nullptr || size == 0) return false;
@@ -419,6 +474,8 @@ bool verifyHost(wchar_t path[MAX_PATH]) noexcept {
     }
 
     if (!hasBytes(kGameFrameTick, kGameFrameTickBytes) ||
+        !hasBytes(kGamePcmRender, kGamePcmRenderBytes) ||
+        !hasBytes(kIsPaused, kIsPausedBytes) ||
         !hasBytes(kCarRenderConnOnLoaded, kCarRenderConnOnLoadedBytes) ||
         !hasBytes(kCarRenderConnHandleFxEvent,
                   kCarRenderConnHandleFxEventBytes) ||
@@ -431,7 +488,18 @@ bool verifyHost(wchar_t path[MAX_PATH]) noexcept {
         !hasBytes(kGetGear, kGetGearBytes) ||
         !hasBytes(kIsGearChanging, kIsGearChangingBytes) ||
         !hasBytes(kGetModel, kGetModelBytes) ||
-        !hasBytes(kGetPositionMarker, kGetPositionMarkerBytes)) {
+        !hasBytes(kGetPositionMarker, kGetPositionMarkerBytes) ||
+        !isReadable(reinterpret_cast<const void*>(kGameFlowState),
+                    sizeof(std::uint32_t)) ||
+        !isReadable(reinterpret_cast<const void*>(kIsInNis), sizeof(bool)) ||
+        !isReadable(reinterpret_cast<const void*>(kWindowHasLostFocus),
+                    sizeof(bool)) ||
+        !isReadable(reinterpret_cast<const void*>(kGameAudioSampleRate),
+                    sizeof(std::uint16_t)) ||
+        !isReadable(reinterpret_cast<const void*>(kGameAudioFrontChannels),
+                    sizeof(std::uint8_t)) ||
+        !isReadable(reinterpret_cast<const void*>(kGameAudioRearChannels),
+                    sizeof(std::uint8_t))) {
         write("GATE_REJECT one or more required code signatures changed");
         return false;
     }
@@ -592,6 +660,50 @@ bool readAttributeValue(void* connection, std::uint32_t attributeHash,
     return entry != nullptr && readValue(entry, 0x4u, output) && *output != 0;
 }
 
+void refreshVehicleTone(VehicleRecord* record) noexcept {
+    if (record == nullptr || record->pointer == nullptr) return;
+    void* collection = nullptr;
+    if (!readValue(record->pointer, kPVehicleAttributeCollectionOffset,
+                   &collection) || collection == nullptr) {
+        record->toneCollection = nullptr;
+        record->toneCollectionKey = 0;
+        record->toneCharacter =
+            nfsmw_exhaust::vehicle_tone::kDefaultCharacter;
+        return;
+    }
+    if (record->toneCollection == collection) return;
+
+    record->toneCollection = collection;
+    record->toneCollectionKey = 0;
+    record->toneCharacter = nfsmw_exhaust::vehicle_tone::kDefaultCharacter;
+    std::array<void*, kMaximumAttributeParentDepth + 1u> visited{};
+    std::size_t visitedCount = 0;
+    void* current = collection;
+    for (std::uint32_t depth = 0;
+         depth <= kMaximumAttributeParentDepth && current != nullptr; ++depth) {
+        const auto visitedEnd = visited.begin() + visitedCount;
+        if (std::find(visited.begin(), visitedEnd, current) != visitedEnd) break;
+        visited[visitedCount++] = current;
+
+        std::uint32_t key = 0;
+        if (!readValue(current, kAttributeCollectionKeyOffset, &key)) break;
+        const auto* entry = g_vehicleToneRegistry.find(key);
+        if (entry != nullptr) {
+            record->toneCollectionKey = key;
+            record->toneCharacter = entry->character;
+            write("VEHICLE_TONE id=%u collection=%s key=%08X depth=%u "
+                  "character=%.3f",
+                  record->id, entry->name.data(),
+                  static_cast<unsigned>(key), static_cast<unsigned>(depth),
+                  static_cast<double>(entry->character));
+            return;
+        }
+        void* parent = nullptr;
+        if (!readValue(current, kAttributeCollectionParentOffset, &parent)) break;
+        current = parent;
+    }
+}
+
 VehicleRecord* recordFor(void* vehicle) noexcept {
     for (auto& record : g_records) {
         if (record.pointer == vehicle) return &record;
@@ -700,8 +812,8 @@ bool resolveVehicle(void* raw, ResolvedVehicle* resolved,
 void populateExhaustMarkers(const VehicleProbe& probe,
                             NfswExhaustVehicleSnapshotC* snapshot) noexcept;
 const ConnectionRecord* findConnection(void* connection) noexcept;
-bool connectionOwnsEmitter(const ConnectionRecord& record,
-                           void* emitter) noexcept;
+bool connectionOwnsEmitter(ConnectionRecord& record,
+                           std::size_t emitterIndex) noexcept;
 void traceExhaustMapping(void* connection, void* renderInfo) noexcept;
 
 void* currentPlayerConnection() noexcept {
@@ -724,16 +836,17 @@ void* currentPlayerConnection() noexcept {
     return connection;
 }
 
-void synchronizePlayerConnection(void* playerConnection) noexcept {
+const ConnectionRecord* synchronizePlayerConnection(
+    void* playerConnection) noexcept {
     for (auto& record : g_connections) {
         if (record.connection != nullptr &&
             record.connection != playerConnection) {
             record = {};
         }
     }
-    if (playerConnection == nullptr ||
-        findConnection(playerConnection) != nullptr) {
-        return;
+    if (playerConnection == nullptr) return nullptr;
+    if (const ConnectionRecord* existing = findConnection(playerConnection)) {
+        return existing;
     }
 
     std::uintptr_t vtable = 0;
@@ -742,11 +855,13 @@ void synchronizePlayerConnection(void* playerConnection) noexcept {
         vtable != kCarRenderConnVtable ||
         !readValue(playerConnection, 0x44u, &renderInfo) ||
         renderInfo == nullptr) {
-        return;
+        return nullptr;
     }
     traceExhaustMapping(playerConnection, renderInfo);
+    return findConnection(playerConnection);
 }
 
+#if NFSMW_EXHAUST_ENABLE_LOGGING
 void logVehicleResolveFailure(
     std::size_t index, const VehicleProbe& probe,
     std::uint64_t nowMs) noexcept {
@@ -765,6 +880,7 @@ void logVehicleResolveFailure(
           reinterpret_cast<void*>(probe.transmissionVtable), probe.renderable,
           reinterpret_cast<void*>(probe.renderableVtable));
 }
+#endif
 
 void scanVehicles(std::uint64_t nowMs) noexcept {
     for (auto& record : g_records) record.seen = false;
@@ -783,7 +899,9 @@ void scanVehicles(std::uint64_t nowMs) noexcept {
         ResolvedVehicle vehicle{};
         VehicleProbe probe{};
         if (!resolveVehicle(entry.vehicle, &vehicle, &probe)) {
+#if NFSMW_EXHAUST_ENABLE_LOGGING
             logVehicleResolveFailure(index, probe, nowMs);
+#endif
             continue;
         }
 
@@ -806,6 +924,7 @@ void scanVehicles(std::uint64_t nowMs) noexcept {
         VehicleRecord* record = recordFor(vehicle.pvehicle);
         if (record == nullptr || g_cachedCount >= g_cached.size()) break;
         record->seen = true;
+        refreshVehicleTone(record);
 #if NFSMW_EXHAUST_ENABLE_LOGGING
         if (!record->layoutLogged) {
             logRenderableOwnerWords(record->id, probe);
@@ -818,6 +937,7 @@ void scanVehicles(std::uint64_t nowMs) noexcept {
         cached.rawRpm = rawRpm;
         cached.rawRedline = rawRedline;
         cached.rawMaxRpm = rawMaxRpm;
+        cached.toneCharacter = record->toneCharacter;
 
         auto& snapshot = cached.snapshot;
         snapshot.id = record->id;
@@ -829,7 +949,6 @@ void scanVehicles(std::uint64_t nowMs) noexcept {
         snapshot.gasInput = controls.gas;
         snapshot.brakeInput = controls.brake;
         snapshot.handBrakeInput = controls.handBrake;
-        snapshot.nitrousActive = 0;
         snapshot.shiftInProgress = shifting ? 1 : 0;
         snapshot.shiftEvent = shifting && !record->previousShift ? 1 : 0;
         snapshot.gearChanged =
@@ -852,16 +971,7 @@ void scanVehicles(std::uint64_t nowMs) noexcept {
         void* connection = nullptr;
         const ConnectionRecord* connectionRecord = nullptr;
         if (readValue(probe.renderable, 0x38u, &connection)) {
-            synchronizePlayerConnection(connection);
-            connectionRecord = findConnection(connection);
-            if (connectionRecord != nullptr) {
-                snapshot.nitrousActive =
-                    nfsmw_exhaust::native_adapter::isNitrousEmitterActive(
-                        connectionRecord->nitrousEmitterCount,
-                        connectionRecord->lastNitrousUpdateMs, nowMs)
-                        ? 1
-                        : 0;
-                }
+            connectionRecord = synchronizePlayerConnection(connection);
         }
         populateExhaustMarkers(probe, &snapshot);
         if (connectionRecord != nullptr) {
@@ -882,7 +992,6 @@ void scanVehicles(std::uint64_t nowMs) noexcept {
                   "normalized[rpm=%.1f redline=%.1f max=%.1f] gear=%d "
                   "shifting=%d shiftEdge=%d gearChanged=%d direction=%d "
                   "controls=%d gas=%.3f brake=%.3f handbrake=%.3f "
-                  "nosButton=%d nosFx=%d "
                   "markers=L%d/R%d markerPos=L(%.3f,%.3f,%.3f)/R(%.3f,%.3f,%.3f) "
                   "diagnostic=1",
                   snapshot.id, vehicle.pvehicle,
@@ -920,8 +1029,6 @@ void scanVehicles(std::uint64_t nowMs) noexcept {
                   static_cast<double>(snapshot.gasInput),
                   static_cast<double>(snapshot.brakeInput),
                   static_cast<double>(snapshot.handBrakeInput),
-                  controlsValid && controls.nitrous != 0 ? 1 : 0,
-                  snapshot.nitrousActive,
                   snapshot.leftExhaust.present, snapshot.rightExhaust.present,
                   static_cast<double>(snapshot.leftExhaust.x),
                   static_cast<double>(snapshot.leftExhaust.y),
@@ -987,7 +1094,72 @@ void clearPluginFlamePulses(ConnectionRecord& connection) noexcept {
     connection.pluginPulseUntilMs.fill(0);
     connection.pluginPulseLastUpdateMs.fill(0);
     connection.pluginPulseEffectKeys.fill(0);
+    connection.pluginPulseOneShotEffectKeys.fill(0);
+    connection.pluginPulseMask = 0;
+    connection.pluginPulseOneShotPendingMask = 0;
     connection.multiOutletSequences.fill({});
+}
+
+struct GameplayGateState {
+    std::uint32_t flow = 0;
+    bool paused = true;
+    bool inNis = true;
+    bool windowLostFocus = true;
+    bool hasPlayerVehicle = false;
+    bool readable = false;
+
+    bool allowsEffects() const noexcept {
+        return readable && flow == kGameFlowRacing && !paused && !inNis &&
+               !windowLostFocus && hasPlayerVehicle;
+    }
+};
+
+GameplayGateState readGameplayGateState() noexcept {
+    GameplayGateState state{};
+    if (!safeRead(reinterpret_cast<const void*>(kGameFlowState), &state.flow,
+                  sizeof(state.flow)) ||
+        !safeRead(reinterpret_cast<const void*>(kIsInNis), &state.inNis,
+                  sizeof(state.inNis)) ||
+        !safeRead(reinterpret_cast<const void*>(kWindowHasLostFocus),
+                  &state.windowLostFocus, sizeof(state.windowLostFocus))) {
+        return state;
+    }
+    __try {
+        state.paused = reinterpret_cast<IsPausedFn>(kIsPaused)();
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return state;
+    }
+    state.hasPlayerVehicle = currentPlayerConnection() != nullptr;
+    state.readable = true;
+    return state;
+}
+
+void suspendGameplayEffects(const GameplayGateState& state) noexcept {
+    const bool wasActive =
+        g_gameplayEffectsActive.exchange(false, std::memory_order_acq_rel);
+    if (!wasActive) return;
+
+    // Stop audio first. The backend closes its enqueue gate before taking the
+    // mixer lock, so no in-flight request can escape into a paused scene.
+    nfsmw_exhaust::native_audio::setPlaybackAllowed(false);
+    NFSW_Exhaust_Reset();
+    g_audioBatchTones = {};
+    for (auto& connection : g_connections) {
+        clearPluginFlamePulses(connection);
+    }
+    write("GAMEPLAY_EFFECTS_SUSPEND flow=%u paused=%d nis=%d focusLost=%d "
+          "playerVehicle=%d",
+          static_cast<unsigned>(state.flow), state.paused ? 1 : 0,
+          state.inNis ? 1 : 0, state.windowLostFocus ? 1 : 0,
+          state.hasPlayerVehicle ? 1 : 0);
+}
+
+void resumeGameplayEffects(const GameplayGateState& state) noexcept {
+    if (g_gameplayEffectsActive.exchange(true, std::memory_order_acq_rel)) {
+        return;
+    }
+    nfsmw_exhaust::native_audio::setPlaybackAllowed(true);
+    write("GAMEPLAY_EFFECTS_RESUME flow=%u", static_cast<unsigned>(state.flow));
 }
 
 VehicleRecord* vehicleRecordForId(std::uint32_t vehicleId) noexcept {
@@ -1027,6 +1199,55 @@ std::uint32_t nextOutletRandom() noexcept {
     return g_outletRandomState;
 }
 
+std::uint32_t nextToneRandom() noexcept {
+    g_toneRandomState ^= g_toneRandomState << 13u;
+    g_toneRandomState ^= g_toneRandomState >> 17u;
+    g_toneRandomState ^= g_toneRandomState << 5u;
+    return g_toneRandomState;
+}
+
+float resolveAudioBatchTone(const NfswExhaustAudioRequestC& request,
+                            float baseCharacter) noexcept {
+    if (request.sequenceId != 0) {
+        for (auto& batch : g_audioBatchTones) {
+            if (batch.expiresAtMs < request.emittedAtMs) batch = {};
+            if (batch.vehicleId == request.vehicleId &&
+                batch.sequenceId == request.sequenceId) {
+                return batch.character;
+            }
+        }
+    }
+
+    const float probability =
+        g_vehicleToneRegistry.batchTowardNeutralProbability;
+    const float roll = static_cast<float>(nextToneRandom() >> 8u) /
+                       16777216.0f;
+    float resolved = baseCharacter;
+    if (roll < probability) {
+        const float variationRoll =
+            static_cast<float>(nextToneRandom() >> 8u) / 16777216.0f;
+        resolved = nfsmw_exhaust::vehicle_tone::varyBatchCharacter(
+            baseCharacter,
+            g_vehicleToneRegistry.batchTowardNeutralAmount,
+            g_vehicleToneRegistry.batchFullNeutralDistance,
+            g_vehicleToneRegistry.batchMaxNeutralOvershoot,
+            variationRoll);
+    }
+    if (request.sequenceId == 0) return resolved;
+
+    AudioBatchTone* target = &g_audioBatchTones[0];
+    for (auto& batch : g_audioBatchTones) {
+        if (batch.sequenceId == 0) {
+            target = &batch;
+            break;
+        }
+        if (batch.expiresAtMs < target->expiresAtMs) target = &batch;
+    }
+    *target = AudioBatchTone{request.vehicleId, request.sequenceId,
+                             request.emittedAtMs + 5000u, resolved};
+    return resolved;
+}
+
 void shuffleOutletIndices(std::array<std::size_t, kMaxExhaustMarkers>& indices,
                           std::size_t count) noexcept {
     while (count > 1) {
@@ -1037,30 +1258,70 @@ void shuffleOutletIndices(std::array<std::size_t, kMaxExhaustMarkers>& indices,
 }
 
 std::size_t collectOutletIndices(
-    const ConnectionRecord& connection, std::uint32_t markerHash,
+    ConnectionRecord& connection, std::uint32_t markerHash,
     std::array<std::size_t, kMaxExhaustMarkers>* output) noexcept {
     if (output == nullptr) return 0;
     std::size_t count = 0;
     for (std::size_t index = 0; index < connection.emitterCount; ++index) {
         if (connection.markerHashes[index] == markerHash &&
-            connectionOwnsEmitter(connection, connection.emitters[index])) {
+            connectionOwnsEmitter(connection, index)) {
             (*output)[count++] = index;
         }
     }
     return count;
 }
 
+void clearOutletPulse(ConnectionRecord& connection,
+                      std::size_t index) noexcept {
+    const std::uint32_t bit = 1u << index;
+    connection.pluginPulseStartMs[index] = 0;
+    connection.pluginPulseUntilMs[index] = 0;
+    connection.pluginPulseLastUpdateMs[index] = 0;
+    connection.pluginPulseEffectKeys[index] = 0;
+    connection.pluginPulseOneShotEffectKeys[index] = 0;
+    connection.pluginPulseMask &= ~bit;
+    connection.pluginPulseOneShotPendingMask &= ~bit;
+}
+
+void emitPendingOneShot(ConnectionRecord& connection, std::size_t index,
+                        const void* parentMatrix, void* velocity) noexcept {
+    const std::uint32_t bit = 1u << index;
+    if ((connection.pluginPulseOneShotPendingMask & bit) == 0) return;
+
+    const std::uint32_t effectKey =
+        connection.pluginPulseOneShotEffectKeys[index];
+    connection.pluginPulseOneShotPendingMask &= ~bit;
+    connection.pluginPulseOneShotEffectKeys[index] = 0;
+    if (effectKey == 0 || g_originalEmitOneShot == nullptr) return;
+
+    __try {
+        g_originalEmitOneShot(connection.emitters[index], parentMatrix,
+                              effectKey, g_exhaustSmokeIntensity, velocity);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        write("LIVE_EXHAUST_SMOKE_SKIP conn=%p emitter=%p reason=exception",
+              connection.connection, connection.emitters[index]);
+    }
+}
+
 bool armOutlet(ConnectionRecord& connection, std::size_t index,
-               std::uint32_t effectKey, std::uint64_t dueMs,
-               std::uint64_t nowMs) noexcept {
+               std::uint32_t effectKey, std::uint32_t oneShotEffectKey,
+               std::uint64_t dueMs, std::uint64_t nowMs) noexcept {
     if (index >= connection.emitterCount || effectKey == 0 ||
-        !connectionOwnsEmitter(connection, connection.emitters[index])) {
+        !connectionOwnsEmitter(connection, index)) {
         return false;
     }
     connection.pluginPulseStartMs[index] = dueMs;
     connection.pluginPulseUntilMs[index] = dueMs + kPluginFlamePulseMs;
     connection.pluginPulseEffectKeys[index] = effectKey;
+    connection.pluginPulseOneShotEffectKeys[index] = oneShotEffectKey;
     connection.pluginPulseLastUpdateMs[index] = 0;
+    const std::uint32_t bit = 1u << index;
+    connection.pluginPulseMask |= bit;
+    if (oneShotEffectKey != 0) {
+        connection.pluginPulseOneShotPendingMask |= bit;
+    } else {
+        connection.pluginPulseOneShotPendingMask &= ~bit;
+    }
     if (dueMs > nowMs) return true;
 
     void* velocity = nullptr;
@@ -1068,8 +1329,10 @@ bool armOutlet(ConnectionRecord& connection, std::size_t index,
         reinterpret_cast<std::uintptr_t>(connection.connection) + 0x330u);
     if (!readValue(connection.connection, 0x38u, &velocity) ||
         !isReadable(parentMatrix, sizeof(float) * 16u)) {
+        clearOutletPulse(connection, index);
         return false;
     }
+    emitPendingOneShot(connection, index, parentMatrix, velocity);
     __try {
         g_originalUpdateEmitter(connection.emitters[index], parentMatrix,
                                 effectKey, kEmitterTimeStepBits,
@@ -1077,9 +1340,7 @@ bool armOutlet(ConnectionRecord& connection, std::size_t index,
         connection.pluginPulseLastUpdateMs[index] = nowMs;
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
-        connection.pluginPulseStartMs[index] = 0;
-        connection.pluginPulseUntilMs[index] = 0;
-        connection.pluginPulseEffectKeys[index] = 0;
+        clearOutletPulse(connection, index);
         return false;
     }
 }
@@ -1136,6 +1397,10 @@ int NFSW_EXHAUST_CALL spawnFlame(void*,
     if (connection == nullptr) return 0;
 
     std::uint32_t effectKey = 0;
+    const std::uint32_t oneShotEffectKey =
+        g_exhaustSmokeEnabled && g_exhaustSmokeIntensity > 0.0f
+            ? kPluginSmokeEffectKey
+            : 0u;
     void* velocity = nullptr;
     auto* parentMatrix = reinterpret_cast<const void*>(
         reinterpret_cast<std::uintptr_t>(connection->connection) + 0x330u);
@@ -1148,7 +1413,6 @@ int NFSW_EXHAUST_CALL spawnFlame(void*,
               request->vehicleId);
         return 0;
     }
-
     std::array<std::size_t, kMaxExhaustMarkers> left{};
     std::array<std::size_t, kMaxExhaustMarkers> right{};
     const std::size_t leftCount =
@@ -1175,7 +1439,7 @@ int NFSW_EXHAUST_CALL spawnFlame(void*,
         std::size_t leftIndex = 0;
         std::size_t rightIndex = 0;
         bool chooseLeft = request->side == NFSW_EXHAUST_SIDE_LEFT;
-        std::uint64_t dueMs = nowMs;
+        std::uint64_t dueMs = nowMs + kPluginFlameAudioLeadMs;
         while (leftIndex < leftCount || rightIndex < rightCount) {
             std::size_t outlet = 0;
             if ((chooseLeft && leftIndex < leftCount) ||
@@ -1184,7 +1448,8 @@ int NFSW_EXHAUST_CALL spawnFlame(void*,
             } else {
                 outlet = right[rightIndex++];
             }
-            if (!armOutlet(*connection, outlet, effectKey, dueMs, nowMs)) {
+            if (!armOutlet(*connection, outlet, effectKey, oneShotEffectKey,
+                           dueMs, nowMs)) {
                 return 0;
             }
             ++armedOutlets;
@@ -1202,10 +1467,10 @@ int NFSW_EXHAUST_CALL spawnFlame(void*,
         for (std::size_t position = 0; position < outletCount; ++position) {
             const std::uint64_t dueMs =
                 multiOutlet && simultaneous && position > 0
-                    ? nowMs + kMultiOutletStepMs
-                    : nowMs;
-            if (!armOutlet(*connection, outlets[position], effectKey, dueMs,
-                           nowMs)) {
+                    ? nowMs + kPluginFlameAudioLeadMs + kMultiOutletStepMs
+                    : nowMs + kPluginFlameAudioLeadMs;
+            if (!armOutlet(*connection, outlets[position], effectKey,
+                           oneShotEffectKey, dueMs, nowMs)) {
                 return 0;
             }
             ++armedOutlets;
@@ -1218,12 +1483,14 @@ int NFSW_EXHAUST_CALL spawnFlame(void*,
             ? request->emittedAtMs - request->scheduledAtMs
             : 0u;
     write("LIVE_FLAME vehicle=%u side=%s outlets=%u mode=PULSE duration=%llums "
+          "audioLead=%llums "
           "intensity=%.2f effectKey=%08X scheduled=%llu emitted=%llu "
           "lateness=%llu",
           request->vehicleId,
           request->side == NFSW_EXHAUST_SIDE_LEFT ? "LEFT" : "RIGHT",
           armedOutlets,
           static_cast<unsigned long long>(kPluginFlamePulseMs),
+          static_cast<unsigned long long>(kPluginFlameAudioLeadMs),
           static_cast<double>(kPluginFlameIntensity),
           static_cast<unsigned>(effectKey),
           static_cast<unsigned long long>(request->scheduledAtMs),
@@ -1234,22 +1501,19 @@ int NFSW_EXHAUST_CALL spawnFlame(void*,
 void servicePluginFlamePulses(std::uint64_t nowMs) noexcept {
     if (g_originalUpdateEmitter == nullptr) return;
     for (auto& connection : g_connections) {
-        bool hasScheduledPulse = false;
+        if (connection.pluginPulseMask == 0) continue;
         for (std::size_t index = 0; index < connection.emitterCount; ++index) {
-            if (connection.pluginPulseEffectKeys[index] == 0) continue;
+            const std::uint32_t bit = 1u << index;
+            if ((connection.pluginPulseMask & bit) == 0) continue;
             if (connection.pluginPulseUntilMs[index] < nowMs) {
-                connection.pluginPulseStartMs[index] = 0;
-                connection.pluginPulseUntilMs[index] = 0;
-                connection.pluginPulseLastUpdateMs[index] = 0;
-                connection.pluginPulseEffectKeys[index] = 0;
+                clearOutletPulse(connection, index);
                 continue;
             }
-            hasScheduledPulse = true;
         }
         if (findConnection(connection.connection) == nullptr) {
             continue;
         }
-        if (!hasScheduledPulse) {
+        if (connection.pluginPulseMask == 0) {
             continue;
         }
         if (!connectionAllowsBackfire(connection)) {
@@ -1264,12 +1528,14 @@ void servicePluginFlamePulses(std::uint64_t nowMs) noexcept {
             continue;
         }
         for (std::size_t index = 0; index < connection.emitterCount; ++index) {
-            if (connection.pluginPulseEffectKeys[index] == 0) continue;
+            const std::uint32_t bit = 1u << index;
+            if ((connection.pluginPulseMask & bit) == 0) continue;
             if (connection.pluginPulseStartMs[index] > nowMs ||
                 connection.pluginPulseLastUpdateMs[index] == nowMs ||
-                !connectionOwnsEmitter(connection, connection.emitters[index])) {
+                !connectionOwnsEmitter(connection, index)) {
                 continue;
             }
+            emitPendingOneShot(connection, index, parentMatrix, velocity);
             __try {
                 g_originalUpdateEmitter(
                     connection.emitters[index], parentMatrix,
@@ -1277,9 +1543,7 @@ void servicePluginFlamePulses(std::uint64_t nowMs) noexcept {
                     kEmitterTimeStepBits, kPluginFlameIntensity, velocity);
                 connection.pluginPulseLastUpdateMs[index] = nowMs;
             } __except (EXCEPTION_EXECUTE_HANDLER) {
-                connection.pluginPulseStartMs[index] = 0;
-                connection.pluginPulseUntilMs[index] = 0;
-                connection.pluginPulseEffectKeys[index] = 0;
+                clearOutletPulse(connection, index);
                 write("LIVE_FLAME_PULSE_STOP conn=%p emitter=%p "
                       "reason=exception",
                       connection.connection, connection.emitters[index]);
@@ -1291,15 +1555,9 @@ void servicePluginFlamePulses(std::uint64_t nowMs) noexcept {
 bool sunSetHasLightAtPosition(
     std::int32_t count,
     const nfsmw_exhaust::sunset_lighting::SpotLight& light) noexcept {
-    using nfsmw_exhaust::sunset_lighting::SpotLightModel32;
     for (std::int32_t index = 0; index < count; ++index) {
-        SpotLightModel32 existing{};
-        const auto address = reinterpret_cast<const void*>(
-            g_sunSetLightBuffer +
-            static_cast<std::uintptr_t>(index) * sizeof(SpotLightModel32));
-        if (!safeRead(address, &existing, sizeof(existing))) return true;
-        if (nfsmw_exhaust::sunset_lighting::samePosition(existing.light,
-                                                         light)) {
+        if (nfsmw_exhaust::sunset_lighting::samePosition(
+                g_sunSetLightSnapshot[index].light, light)) {
             return true;
         }
     }
@@ -1312,6 +1570,23 @@ void appendPluginFlameLightsToSunSet() noexcept {
     using nfsmw_exhaust::sunset_lighting::Vec3;
 
     if (g_sunSetHookState != SunSetHookState::Installed) return;
+
+    const std::uint64_t nowMs = GetTickCount64();
+    bool hasActivePulse = false;
+    for (const auto& connection : g_connections) {
+        if (connection.pluginPulseMask == 0) continue;
+        for (std::size_t index = 0; index < connection.emitterCount; ++index) {
+            const std::uint32_t bit = 1u << index;
+            if ((connection.pluginPulseMask & bit) != 0 &&
+                connection.pluginPulseStartMs[index] <= nowMs &&
+                connection.pluginPulseUntilMs[index] >= nowMs) {
+                hasActivePulse = true;
+                break;
+            }
+        }
+        if (hasActivePulse) break;
+    }
+    if (!hasActivePulse) return;
 
     std::int32_t lightCount = 0;
     SpotLight configured{};
@@ -1326,9 +1601,15 @@ void appendPluginFlameLightsToSunSet() noexcept {
                   &weatherLightPower, sizeof(weatherLightPower))) {
         return;
     }
+    if (lightCount > 0 &&
+        !safeRead(reinterpret_cast<const void*>(g_sunSetLightBuffer),
+                  g_sunSetLightSnapshot.data(),
+                  static_cast<std::size_t>(lightCount) *
+                      sizeof(SpotLightModel32))) {
+        return;
+    }
 
-    const std::uint64_t nowMs = GetTickCount64();
-    for (const auto& connection : g_connections) {
+    for (auto& connection : g_connections) {
         if (lightCount >= static_cast<std::int32_t>(kSunSetLightCapacity)) {
             break;
         }
@@ -1351,13 +1632,12 @@ void appendPluginFlameLightsToSunSet() noexcept {
                 static_cast<std::int32_t>(kSunSetLightCapacity)) {
                 break;
             }
-            if (connection.pluginPulseEffectKeys[index] == 0 ||
+            if ((connection.pluginPulseMask & (1u << index)) == 0 ||
                 connection.pluginPulseStartMs[index] > nowMs ||
                 connection.pluginPulseUntilMs[index] < nowMs ||
                 (connection.markerHashes[index] != kLeftExhaustHash &&
                  connection.markerHashes[index] != kRightExhaustHash) ||
-                !connectionOwnsEmitter(connection,
-                                       connection.emitters[index])) {
+                !connectionOwnsEmitter(connection, index)) {
                 continue;
             }
 
@@ -1381,6 +1661,7 @@ void appendPluginFlameLightsToSunSet() noexcept {
                 g_sunSetLightBuffer +
                 static_cast<std::uintptr_t>(lightCount) * sizeof(model));
             if (!safeWrite(destination, &model, sizeof(model))) return;
+            g_sunSetLightSnapshot[lightCount] = model;
             ++lightCount;
         }
     }
@@ -1481,6 +1762,7 @@ nfsmw_exhaust::native_audio::Spatialization audioSpatialization(
     nfsmw_exhaust::native_audio::Spatialization result{};
     if (distanceOut != nullptr) *distanceOut = 0.0f;
     CachedVehicle* source = cachedVehicleForId(request.vehicleId);
+    if (source != nullptr) result.toneCharacter = source->toneCharacter;
     CachedVehicle* listener = nullptr;
     for (std::uint32_t index = 0; index < g_cachedCount; ++index) {
         if (g_cached[index].snapshot.valid != 0 &&
@@ -1554,12 +1836,14 @@ void NFSW_EXHAUST_CALL playAudio(void*,
     const CachedVehicle* source = cachedVehicleForId(request->vehicleId);
     if (source == nullptr || !cachedVehicleAllowsBackfire(*source)) return;
     float distance = 0.0f;
-    const auto spatial = audioSpatialization(*request, &distance);
+    auto spatial = audioSpatialization(*request, &distance);
+    spatial.toneCharacter =
+        resolveAudioBatchTone(*request, source->toneCharacter);
     const bool played =
         nfsmw_exhaust::native_audio::play(request->assetId, spatial);
     write("LIVE_AUDIO vehicle=%u side=%s clip=%u asset='%s' "
           "played=%d gain=%.3f pan=%.3f lowpass=%.3f distance=%.2f "
-          "scheduled=%llu emitted=%llu",
+          "tone=%.3f sequence=%u scheduled=%llu emitted=%llu",
           request->vehicleId,
           request->side == NFSW_EXHAUST_SIDE_LEFT ? "LEFT" : "RIGHT",
           static_cast<unsigned>(request->clipIndex) + 1u,
@@ -1569,6 +1853,8 @@ void NFSW_EXHAUST_CALL playAudio(void*,
           static_cast<double>(spatial.pan),
           static_cast<double>(spatial.lowPass),
           static_cast<double>(distance),
+          static_cast<double>(spatial.toneCharacter),
+          static_cast<unsigned>(request->sequenceId),
           static_cast<unsigned long long>(request->scheduledAtMs),
           static_cast<unsigned long long>(request->emittedAtMs));
 }
@@ -1589,9 +1875,39 @@ void NFSW_EXHAUST_CALL coreLog(void*, const char* message) {
     write("CORE %s", message == nullptr ? "<null>" : message);
 }
 
+void __cdecl gamePcmRenderHook(std::int16_t** samples,
+                              std::int32_t frameCount) {
+    g_originalGamePcmRender(samples, frameCount);
+    if (!g_gameplayEffectsActive.load(std::memory_order_acquire)) return;
+    const auto frontChannels =
+        *reinterpret_cast<volatile const std::uint8_t*>(
+            kGameAudioFrontChannels);
+    const auto rearChannels =
+        *reinterpret_cast<volatile const std::uint8_t*>(
+            kGameAudioRearChannels);
+    const auto sampleRate = *reinterpret_cast<volatile const std::uint16_t*>(
+        kGameAudioSampleRate);
+    const std::uint32_t channels =
+        static_cast<std::uint32_t>(frontChannels) + rearChannels;
+    if (samples != nullptr && *samples != nullptr && frameCount > 0 &&
+        frameCount <= 65536 && channels >= 1u && channels <= 8u) {
+        nfsmw_exhaust::native_audio::mixIntoGameBuffer(
+            *samples, static_cast<std::size_t>(frameCount), channels,
+            sampleRate);
+    }
+}
+
 void __cdecl gameFrameTickHook(std::uint32_t elapsedMs) {
+    ++g_frameSerial;
+    if (g_frameSerial == 0) ++g_frameSerial;
     g_originalGameFrameTick(elapsedMs);
     tryInstallSunSetLightingHook();
+    const GameplayGateState gameplay = readGameplayGateState();
+    if (!gameplay.allowsEffects()) {
+        suspendGameplayEffects(gameplay);
+        return;
+    }
+    resumeGameplayEffects(gameplay);
     const std::uint64_t nowMs = GetTickCount64();
     NFSW_Exhaust_OnFrame(nowMs);
     servicePluginFlamePulses(nowMs);
@@ -1649,42 +1965,36 @@ void traceExhaustMapping(void* connection, void* renderInfo) noexcept {
         reinterpret_cast<std::uintptr_t>(renderInfo) + 0x1ACu);
     auto* emitterSentinel = reinterpret_cast<void*>(
         reinterpret_cast<std::uintptr_t>(connection) + 0x3E4u);
-    auto* nitrousEmitterSentinel = reinterpret_cast<void*>(
-        reinterpret_cast<std::uintptr_t>(connection) + 0x3ECu);
     std::array<void*, kMaxExhaustMarkers> markerNodes{};
     std::array<void*, kMaxExhaustMarkers> emitterNodes{};
-    std::array<void*, kMaxNitrousEmitters> nitrousEmitterNodes{};
     const std::size_t markerCount = collectListNodes(
         markerSentinel, markerNodes.data(), markerNodes.size());
     const std::size_t emitterCount = collectListNodes(
         emitterSentinel, emitterNodes.data(), emitterNodes.size());
-    const std::size_t nitrousEmitterCount = collectListNodes(
-        nitrousEmitterSentinel, nitrousEmitterNodes.data(),
-        nitrousEmitterNodes.size());
     record->emitterCount = emitterCount;
-    record->nitrousEmitterCount = nitrousEmitterCount;
-    std::copy_n(nitrousEmitterNodes.begin(), nitrousEmitterCount,
-                record->nitrousEmitters.begin());
 
-    write("EXHAUST_LIST conn=%p renderInfo=%p markers=%u emitters=%u "
-          "nitrousEmitters=%u",
+#if NFSMW_EXHAUST_ENABLE_LOGGING
+    write("EXHAUST_LIST conn=%p renderInfo=%p markers=%u emitters=%u",
           connection, renderInfo, static_cast<unsigned>(markerCount),
-          static_cast<unsigned>(emitterCount),
-          static_cast<unsigned>(nitrousEmitterCount));
+          static_cast<unsigned>(emitterCount));
+#endif
     for (std::size_t index = 0; index < emitterCount; ++index) {
         record->emitters[index] = emitterNodes[index];
         std::uint32_t hash = 0;
         ExhaustMarkerNode markerNode{};
         PositionMarkerData marker{};
-        std::array<float, 16> emitterMatrix{};
         bool markerReadable = false;
+#if NFSMW_EXHAUST_ENABLE_LOGGING
+        std::array<float, 16> emitterMatrix{};
         bool matrixMatch = false;
+#endif
         if (index < markerCount &&
             safeRead(markerNodes[index], &markerNode, sizeof(markerNode)) &&
             markerNode.markerData != nullptr &&
             safeRead(markerNode.markerData, &marker, sizeof(marker))) {
             markerReadable = true;
             hash = marker.nameHash;
+#if NFSMW_EXHAUST_ENABLE_LOGGING
             matrixMatch = safeRead(
                               reinterpret_cast<const std::uint8_t*>(
                                   emitterNodes[index]) +
@@ -1692,12 +2002,14 @@ void traceExhaustMapping(void* connection, void* renderInfo) noexcept {
                               emitterMatrix.data(), sizeof(emitterMatrix)) &&
                           std::memcmp(emitterMatrix.data(), marker.matrix,
                                       sizeof(marker.matrix)) == 0;
+#endif
         }
         record->markerHashes[index] = hash;
         if (markerReadable) {
             record->markerPositions[index] = {{
                 markerNode.x, markerNode.y, markerNode.z}};
         }
+#if NFSMW_EXHAUST_ENABLE_LOGGING
         write("EXHAUST_MAP conn=%p index=%u markerNode=%p markerData=%p "
               "hash=%08X side=%s emitter=%p markerReadable=%d matrixMatch=%d "
               "nodePos=(%.3f,%.3f,%.3f) matrixTrow=(%.3f,%.3f,%.3f) "
@@ -1716,12 +2028,15 @@ void traceExhaustMapping(void* connection, void* renderInfo) noexcept {
               markerReadable ? marker.matrix[3] : 0.0f,
               markerReadable ? marker.matrix[7] : 0.0f,
               markerReadable ? marker.matrix[11] : 0.0f);
+#endif
     }
+#if NFSMW_EXHAUST_ENABLE_LOGGING
     if (markerCount != emitterCount) {
         write("EXHAUST_MAP_INCOMPLETE conn=%p markers=%u emitters=%u",
               connection, static_cast<unsigned>(markerCount),
               static_cast<unsigned>(emitterCount));
     }
+#endif
 }
 
 const ConnectionRecord* findConnection(void* connection) noexcept {
@@ -1752,8 +2067,12 @@ void populateExhaustMarkers(const VehicleProbe& probe,
         NfswExhaustMarkerC* target = nullptr;
         if (record->markerHashes[index] == kLeftExhaustHash) {
             target = &snapshot->leftExhaust;
+            if (snapshot->leftExhaustCount != UINT16_MAX)
+                ++snapshot->leftExhaustCount;
         } else if (record->markerHashes[index] == kRightExhaustHash) {
             target = &snapshot->rightExhaust;
+            if (snapshot->rightExhaustCount != UINT16_MAX)
+                ++snapshot->rightExhaustCount;
         }
         if (target == nullptr || target->present != 0) continue;
         target->present = 1;
@@ -1764,8 +2083,17 @@ void populateExhaustMarkers(const VehicleProbe& probe,
     }
 }
 
-bool connectionOwnsEmitter(const ConnectionRecord& record,
-                           void* emitter) noexcept {
+bool refreshEmitterOwnership(ConnectionRecord& record) noexcept {
+    if (record.emitterOwnershipCached &&
+        record.emitterOwnershipFrame == g_frameSerial) {
+        return record.emitterOwnershipValid;
+    }
+
+    record.emitterOwnershipCached = true;
+    record.emitterOwnershipFrame = g_frameSerial;
+    record.emitterOwnershipValid = false;
+    record.ownedEmitters.fill(false);
+
     std::uintptr_t vtable = 0;
     void* renderInfo = nullptr;
     if (!safeRead(record.connection, &vtable, sizeof(vtable)) ||
@@ -1779,27 +2107,20 @@ bool connectionOwnsEmitter(const ConnectionRecord& record,
     std::array<void*, kMaxExhaustMarkers> nodes{};
     const std::size_t count =
         collectListNodes(sentinel, nodes.data(), nodes.size());
-    return std::find(nodes.begin(), nodes.begin() + count, emitter) !=
-           nodes.begin() + count;
+    for (std::size_t index = 0; index < record.emitterCount; ++index) {
+        record.ownedEmitters[index] =
+            std::find(nodes.begin(), nodes.begin() + count,
+                      record.emitters[index]) != nodes.begin() + count;
+    }
+    record.emitterOwnershipValid = true;
+    return true;
 }
 
-bool connectionOwnsNitrousEmitter(const ConnectionRecord& record,
-                                  void* emitter) noexcept {
-    std::uintptr_t vtable = 0;
-    void* renderInfo = nullptr;
-    if (!safeRead(record.connection, &vtable, sizeof(vtable)) ||
-        vtable != kCarRenderConnVtable ||
-        !readValue(record.connection, 0x44u, &renderInfo) ||
-        renderInfo != record.renderInfo) {
-        return false;
-    }
-    auto* sentinel = reinterpret_cast<void*>(
-        reinterpret_cast<std::uintptr_t>(record.connection) + 0x3ECu);
-    std::array<void*, kMaxNitrousEmitters> nodes{};
-    const std::size_t count =
-        collectListNodes(sentinel, nodes.data(), nodes.size());
-    return std::find(nodes.begin(), nodes.begin() + count, emitter) !=
-           nodes.begin() + count;
+bool connectionOwnsEmitter(ConnectionRecord& record,
+                           std::size_t emitterIndex) noexcept {
+    return emitterIndex < record.emitterCount &&
+           refreshEmitterOwnership(record) &&
+           record.ownedEmitters[emitterIndex];
 }
 
 ConnectionRecord* findEmitterOwner(void* emitter,
@@ -1810,28 +2131,13 @@ ConnectionRecord* findEmitterOwner(void* emitter,
         for (std::size_t index = 0; index < record.emitterCount; ++index) {
             if (record.emitters[index] == emitter &&
                 (best == nullptr || record.generation > best->generation) &&
-                connectionOwnsEmitter(record, emitter)) {
+                connectionOwnsEmitter(record, index)) {
                 best = &record;
                 bestIndex = index;
             }
         }
     }
     if (best != nullptr && outputIndex != nullptr) *outputIndex = bestIndex;
-    return best;
-}
-
-ConnectionRecord* findNitrousEmitterOwner(void* emitter) noexcept {
-    ConnectionRecord* best = nullptr;
-    for (auto& record : g_connections) {
-        for (std::size_t index = 0; index < record.nitrousEmitterCount;
-             ++index) {
-            if (record.nitrousEmitters[index] == emitter &&
-                (best == nullptr || record.generation > best->generation) &&
-                connectionOwnsNitrousEmitter(record, emitter)) {
-                best = &record;
-            }
-        }
-    }
     return best;
 }
 
@@ -1843,21 +2149,18 @@ void __fastcall carRenderConnOnLoadedHook(void* connection, void*,
     }
     std::uintptr_t connectionVtable = 0;
     void* storedRenderInfo = nullptr;
-    void* exhaustFirst = nullptr;
-    void* nitrousFirst = nullptr;
-    void* renderInfoExhaustFirst = nullptr;
-    void* renderInfoNitrousFirst = nullptr;
     safeRead(connection, &connectionVtable, sizeof(connectionVtable));
     readValue(connection, 0x44u, &storedRenderInfo);
+#if NFSMW_EXHAUST_ENABLE_LOGGING
+    void* exhaustFirst = nullptr;
+    void* renderInfoExhaustFirst = nullptr;
     readValue(connection, 0x3E4u, &exhaustFirst);
-    readValue(connection, 0x3ECu, &nitrousFirst);
     readValue(renderInfo, 0x1ACu, &renderInfoExhaustFirst);
-    readValue(renderInfo, 0x1A4u, &renderInfoNitrousFirst);
     write("RENDER_CONN_LOADED conn=%p vt=%p argRenderInfo=%p storedRenderInfo=%p "
-          "emitters=exhaust:%p nitrous:%p markers=exhaust:%p nitrous:%p",
+          "emitters=exhaust:%p markers=exhaust:%p",
           connection, reinterpret_cast<void*>(connectionVtable), renderInfo,
-          storedRenderInfo, exhaustFirst, nitrousFirst, renderInfoExhaustFirst,
-          renderInfoNitrousFirst);
+          storedRenderInfo, exhaustFirst, renderInfoExhaustFirst);
+#endif
     if (connectionVtable == kCarRenderConnVtable && renderInfo != nullptr &&
         storedRenderInfo == renderInfo) {
         traceExhaustMapping(connection, renderInfo);
@@ -1866,25 +2169,31 @@ void __fastcall carRenderConnOnLoadedHook(void* connection, void*,
 
 void __fastcall carRenderConnHandleFxEventHook(void* connection, void*,
                                                std::uint32_t eventCode) {
+#if NFSMW_EXHAUST_ENABLE_LOGGING
     std::uint32_t flagsBefore = 0;
     std::uint32_t flagsAfter = 0;
     void* renderInfo = nullptr;
     readValue(connection, 0x3F8u, &flagsBefore);
     readValue(connection, 0x44u, &renderInfo);
+#endif
     std::uint32_t vehicleId = 0;
     if ((eventCode == 0u || eventCode == 3u || eventCode == 4u) &&
         shouldSuppressStockBackfire(connection, &vehicleId)) {
+#if NFSMW_EXHAUST_ENABLE_LOGGING
         write("FX_EVENT_SUPPRESS vehicle=%u conn=%p renderInfo=%p code=%u "
               "flags=%08X",
               vehicleId, connection, renderInfo, eventCode, flagsBefore);
+#endif
         return;
     }
     g_originalCarRenderConnHandleFxEvent(connection, eventCode);
+#if NFSMW_EXHAUST_ENABLE_LOGGING
     readValue(connection, 0x3F8u, &flagsAfter);
     if (eventCode == 0u || eventCode == 3u || eventCode == 4u) {
         write("FX_EVENT_FORWARD conn=%p renderInfo=%p code=%u flags=%08X->%08X",
               connection, renderInfo, eventCode, flagsBefore, flagsAfter);
     }
+#endif
 }
 
 void __fastcall emitOneShotHook(void* emitter, void*, const void* parentMatrix,
@@ -1895,6 +2204,7 @@ void __fastcall emitOneShotHook(void* emitter, void*, const void* parentMatrix,
     if (owner != nullptr) {
         std::uint32_t vehicleId = 0;
         if (shouldSuppressStockBackfire(owner->connection, &vehicleId)) {
+#if NFSMW_EXHAUST_ENABLE_LOGGING
             write("EMIT_ONE_SHOT_SUPPRESS vehicle=%u conn=%p emitter=%p "
                   "index=%u hash=%08X side=%s effectKey=%08X",
                   vehicleId, owner->connection, emitter,
@@ -1902,14 +2212,17 @@ void __fastcall emitOneShotHook(void* emitter, void*, const void* parentMatrix,
                   static_cast<unsigned>(owner->markerHashes[index]),
                   markerSide(owner->markerHashes[index]),
                   static_cast<unsigned>(effectKey));
+#endif
             return;
         }
+#if NFSMW_EXHAUST_ENABLE_LOGGING
         write("EMIT_ONE_SHOT_FORWARD conn=%p emitter=%p index=%u hash=%08X "
               "side=%s effectKey=%08X intensity=%.3f parentMatrix=%p velocity=%p",
               owner->connection, emitter, static_cast<unsigned>(index),
               static_cast<unsigned>(owner->markerHashes[index]),
               markerSide(owner->markerHashes[index]),
               static_cast<unsigned>(effectKey), intensity, parentMatrix, velocity);
+#endif
     }
     g_originalEmitOneShot(emitter, parentMatrix, effectKey, intensity, velocity);
 }
@@ -1921,22 +2234,19 @@ void __fastcall updateEmitterHook(void* emitter, void*,
                                   const void* velocity) {
     std::size_t index = 0;
     ConnectionRecord* owner = findEmitterOwner(emitter, &index);
-    ConnectionRecord* nitrousOwner =
-        owner == nullptr ? findNitrousEmitterOwner(emitter) : nullptr;
+#if NFSMW_EXHAUST_ENABLE_LOGGING
     void* particleBefore = nullptr;
     std::uint32_t storedBefore = 0;
     const bool beforeReadable =
         owner != nullptr && readValue(emitter, 0x50u, &particleBefore) &&
         readValue(emitter, 0x54u, &storedBefore);
+#endif
 
     g_originalUpdateEmitter(emitter, parentMatrix, effectKey, parameter,
                             intensity, velocity);
-    if (nitrousOwner != nullptr && effectKey != 0 && intensity > 0.0f) {
-        nitrousOwner->lastNitrousUpdateMs = GetTickCount64();
-        return;
-    }
     if (owner == nullptr) return;
 
+#if NFSMW_EXHAUST_ENABLE_LOGGING
     void* particleAfter = nullptr;
     std::uint32_t storedAfter = 0;
     const bool afterReadable = readValue(emitter, 0x50u, &particleAfter) &&
@@ -1966,6 +2276,7 @@ void __fastcall updateEmitterHook(void* emitter, void*,
     owner->lastUpdateEffectKeys[index] = effectKey;
     owner->lastParticleInstances[index] = particleAfter;
     owner->lastStoredEffectKeys[index] = storedAfter;
+#endif
 }
 
 bool appendPath(char path[MAX_PATH], const char* fileName) noexcept {
@@ -1999,22 +2310,71 @@ bool registerCore() noexcept {
     const DWORD modulePathSize =
         GetModuleFileNameA(g_pluginModule, modulePath, MAX_PATH);
     if (modulePathSize == 0 || modulePathSize >= MAX_PATH) {
-        write("CONFIG module path unavailable; built-in defaults active");
-        return true;
+        write("INIT_FAIL module path unavailable");
+        NFSW_Exhaust_Shutdown();
+        return false;
     }
     char configPath[MAX_PATH] = {};
     char audioPath[MAX_PATH] = {};
     std::strcpy(configPath, modulePath);
     std::strcpy(audioPath, modulePath);
-    if (appendPath(configPath, "NFSMWExhaustBackfire.ini")) {
-        write("CONFIG main path='%s' loaded=%d", configPath,
-              NFSW_Exhaust_LoadConfig(configPath));
+    if (!appendPath(configPath, "NFSMWExhaustBackfire.ini") ||
+        !NFSW_Exhaust_LoadConfig(configPath)) {
+        write("INIT_FAIL main configuration path='%s'", configPath);
+        NFSW_Exhaust_Shutdown();
+        return false;
     }
-    if (appendPath(audioPath, "BackfireAudio.ini")) {
-        write("CONFIG audio path='%s' loaded=%d", audioPath,
-              NFSW_Exhaust_LoadAudioManifest(audioPath));
+    g_exhaustSmokeEnabled =
+        GetPrivateProfileIntA("ExhaustSmoke", "enabled", 1, configPath) != 0;
+    char smokeIntensityText[32] = {};
+    GetPrivateProfileStringA("ExhaustSmoke", "intensity", "1.15",
+                             smokeIntensityText,
+                             static_cast<DWORD>(sizeof(smokeIntensityText)),
+                             configPath);
+    char* smokeIntensityEnd = nullptr;
+    const float parsedSmokeIntensity =
+        std::strtof(smokeIntensityText, &smokeIntensityEnd);
+    if (smokeIntensityEnd != smokeIntensityText &&
+        *smokeIntensityEnd == '\0' && std::isfinite(parsedSmokeIntensity)) {
+        g_exhaustSmokeIntensity =
+            std::clamp(parsedSmokeIntensity, 0.0f, 2.0f);
+    } else {
+        g_exhaustSmokeIntensity = 1.15f;
     }
-    nfsmw_exhaust::native_audio::initialize(modulePath);
+    write("EXHAUST_SMOKE_CONFIG enabled=%d intensity=%.3f effect=%08X",
+          g_exhaustSmokeEnabled ? 1 : 0,
+          static_cast<double>(g_exhaustSmokeIntensity),
+          static_cast<unsigned>(kPluginSmokeEffectKey));
+    std::string toneError;
+    if (!nfsmw_exhaust::vehicle_tone::loadFile(
+            configPath, &g_vehicleToneRegistry, &toneError)) {
+        write("INIT_FAIL vehicle tone configuration path='%s' reason='%s'",
+              configPath, toneError.c_str());
+        NFSW_Exhaust_Shutdown();
+        return false;
+    }
+    write("VEHICLE_TONE_CONFIG entries=%u default=1.000 range=0.000..2.000 "
+          "batchTowardNeutralProbability=%.3f maximumPull=%.3f "
+          "fullDistance=%.3f maximumOvershoot=%.3f",
+          static_cast<unsigned>(g_vehicleToneRegistry.count),
+          static_cast<double>(
+              g_vehicleToneRegistry.batchTowardNeutralProbability),
+          static_cast<double>(g_vehicleToneRegistry.batchTowardNeutralAmount),
+          static_cast<double>(
+              g_vehicleToneRegistry.batchFullNeutralDistance),
+          static_cast<double>(
+              g_vehicleToneRegistry.batchMaxNeutralOvershoot));
+    if (!appendPath(audioPath, "BackfireAudio.ini") ||
+        !NFSW_Exhaust_LoadAudioManifest(audioPath)) {
+        write("INIT_FAIL audio manifest path='%s'", audioPath);
+        NFSW_Exhaust_Shutdown();
+        return false;
+    }
+    if (!nfsmw_exhaust::native_audio::initialize(modulePath, audioPath)) {
+        write("INIT_FAIL native audio backend");
+        NFSW_Exhaust_Shutdown();
+        return false;
+    }
     return true;
 }
 
@@ -2048,11 +2408,16 @@ bool installHooks() noexcept {
         reinterpret_cast<void*>(kUpdateEmitter),
         reinterpret_cast<void*>(&updateEmitterHook),
         reinterpret_cast<void**>(&g_originalUpdateEmitter));
+    const MH_STATUS audioCreated = MH_CreateHook(
+        reinterpret_cast<void*>(kGamePcmRender),
+        reinterpret_cast<void*>(&gamePcmRenderHook),
+        reinterpret_cast<void**>(&g_originalGamePcmRender));
     if (loadedCreated != MH_OK || eventCreated != MH_OK || emitCreated != MH_OK ||
-        updateCreated != MH_OK) {
-        write("HOOK_FAIL render hooks create loaded=%d event=%d emit=%d update=%d",
+        updateCreated != MH_OK || audioCreated != MH_OK) {
+        write("HOOK_FAIL create loaded=%d event=%d emit=%d update=%d audio=%d",
               static_cast<int>(loadedCreated), static_cast<int>(eventCreated),
-              static_cast<int>(emitCreated), static_cast<int>(updateCreated));
+              static_cast<int>(emitCreated), static_cast<int>(updateCreated),
+              static_cast<int>(audioCreated));
         MH_RemoveHook(reinterpret_cast<void*>(kGameFrameTick));
         if (loadedCreated == MH_OK)
             MH_RemoveHook(reinterpret_cast<void*>(kCarRenderConnOnLoaded));
@@ -2062,11 +2427,13 @@ bool installHooks() noexcept {
             MH_RemoveHook(reinterpret_cast<void*>(kEmitOneShot));
         if (updateCreated == MH_OK)
             MH_RemoveHook(reinterpret_cast<void*>(kUpdateEmitter));
+        if (audioCreated == MH_OK)
+            MH_RemoveHook(reinterpret_cast<void*>(kGamePcmRender));
         return false;
     }
-    const std::array<std::uintptr_t, 5> hooks{{
+    const std::array<std::uintptr_t, 6> hooks{{
         kGameFrameTick, kCarRenderConnOnLoaded, kCarRenderConnHandleFxEvent,
-        kEmitOneShot, kUpdateEmitter}};
+        kEmitOneShot, kUpdateEmitter, kGamePcmRender}};
     std::size_t enabledCount = 0;
     for (; enabledCount < hooks.size(); ++enabledCount) {
         const MH_STATUS enabled =
@@ -2099,6 +2466,8 @@ bool installHooks() noexcept {
           static_cast<unsigned>(kEmitOneShot), g_originalEmitOneShot);
     write("HOOK_OK UpdateEmitter address=0x%08X trampoline=%p",
           static_cast<unsigned>(kUpdateEmitter), g_originalUpdateEmitter);
+    write("HOOK_OK GamePcmRender address=0x%08X trampoline=%p",
+          static_cast<unsigned>(kGamePcmRender), g_originalGamePcmRender);
     return true;
 }
 
@@ -2112,6 +2481,9 @@ NFSW_Exhaust_NativeMain(HMODULE module) {
                           static_cast<std::uint32_t>(
                               reinterpret_cast<std::uintptr_t>(module));
     if (g_outletRandomState == 0) g_outletRandomState = 0xA53C9E17u;
+    g_toneRandomState = g_outletRandomState ^ 0x6D2B79F5u;
+    if (g_toneRandomState == 0) g_toneRandomState = 0x6D2B79F5u;
+    g_audioBatchTones = {};
 #if NFSMW_EXHAUST_ENABLE_LOGGING
     char modulePath[MAX_PATH] = {};
     const DWORD modulePathSize = GetModuleFileNameA(module, modulePath, MAX_PATH);
@@ -2121,14 +2493,19 @@ NFSW_Exhaust_NativeMain(HMODULE module) {
     }
 #endif
 
-    write("INIT replacement mode: paired pulse flames, spatial XAudio2, and "
-          "NOS edge audio enabled; stock exhaust backfire suppressed after "
+    write("INIT replacement mode: paired pulse flames and native game PCM audio; "
+          "stock exhaust backfire suppressed after "
           "marker validation");
     wchar_t executablePath[MAX_PATH] = {};
     if (!verifyHost(executablePath)) return -1;
     if (!registerCore()) return -1;
+    // The first verified gameplay frame opens this gate. Loading directly into
+    // a menu or attaching during a pause must never leave the mixer armed.
+    g_gameplayEffectsActive.store(false, std::memory_order_release);
+    nfsmw_exhaust::native_audio::setPlaybackAllowed(false);
     if (!installHooks()) {
         NFSW_Exhaust_Shutdown();
+        nfsmw_exhaust::native_audio::shutdown();
         return -1;
     }
     write("MARKER_HASH LEFT_EXHAUST=0x%08X RIGHT_EXHAUST=0x%08X",
