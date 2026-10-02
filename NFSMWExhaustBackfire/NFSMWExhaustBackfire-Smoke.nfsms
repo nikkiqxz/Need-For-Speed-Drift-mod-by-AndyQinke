@@ -1,49 +1,49 @@
-# NFSMW Exhaust Backfire v1.1.48 dedicated exhaust-vapor effect V5.
+# NFSMW Exhaust Backfire v1.1.49 dedicated exhaust-vapor effect V6.
 # Import once with NFS-VltEd after opening the Need for Speed Most Wanted game directory.
 # The stock fxcar_exhaust_bmw records are not modified, so AI and other effects remain stock.
-# V5 increases particle lifetime by 25% while remaining isolated from V1-V4 records.
+# V6 keeps stable runtime intensity and raises density through emitter rate.
 
-copy_node emitterdata emcar_exhaust_bmw default emcar_backfire_smoke_soft_v5_1
-copy_node emitterdata emcar_exhaust_bmw2 default emcar_backfire_smoke_soft_v5_2
+copy_node emitterdata emcar_exhaust_bmw default emcar_backfire_smoke_soft_v6_1
+copy_node emitterdata emcar_exhaust_bmw2 default emcar_backfire_smoke_soft_v6_2
 
-update_field emitterdata emcar_backfire_smoke_soft_v5_1 Life 0.5625
-update_field emitterdata emcar_backfire_smoke_soft_v5_1 LifeVariance 0.0625
-update_field emitterdata emcar_backfire_smoke_soft_v5_1 NumParticles 16
-update_field emitterdata emcar_backfire_smoke_soft_v5_1 MotionInherit 0.90
-update_field emitterdata emcar_backfire_smoke_soft_v5_1 IsOneShot true
-update_field emitterdata emcar_backfire_smoke_soft_v5_1 OnCycle 0.12
-update_field emitterdata emcar_backfire_smoke_soft_v5_1 OnCycleVariance 0
-update_field emitterdata emcar_backfire_smoke_soft_v5_1 OffCycle 0
-update_field emitterdata emcar_backfire_smoke_soft_v5_1 OffCycleVariance 0
-update_field emitterdata emcar_backfire_smoke_soft_v5_1 Color1 3705857536
-update_field emitterdata emcar_backfire_smoke_soft_v5_1 Color2 3992122652
-update_field emitterdata emcar_backfire_smoke_soft_v5_1 Color3 3857378576
-update_field emitterdata emcar_backfire_smoke_soft_v5_1 Color4 3588088064
-update_field emitterdata emcar_backfire_smoke_soft_v5_1 Size X 0.336
-update_field emitterdata emcar_backfire_smoke_soft_v5_1 Size Y 0.54
-update_field emitterdata emcar_backfire_smoke_soft_v5_1 Size Z 0.90
-update_field emitterdata emcar_backfire_smoke_soft_v5_1 Size W 1.26
+update_field emitterdata emcar_backfire_smoke_soft_v6_1 Life 0.5625
+update_field emitterdata emcar_backfire_smoke_soft_v6_1 LifeVariance 0.0625
+update_field emitterdata emcar_backfire_smoke_soft_v6_1 NumParticles 19
+update_field emitterdata emcar_backfire_smoke_soft_v6_1 MotionInherit 0.90
+update_field emitterdata emcar_backfire_smoke_soft_v6_1 IsOneShot true
+update_field emitterdata emcar_backfire_smoke_soft_v6_1 OnCycle 0.12
+update_field emitterdata emcar_backfire_smoke_soft_v6_1 OnCycleVariance 0
+update_field emitterdata emcar_backfire_smoke_soft_v6_1 OffCycle 0
+update_field emitterdata emcar_backfire_smoke_soft_v6_1 OffCycleVariance 0
+update_field emitterdata emcar_backfire_smoke_soft_v6_1 Color1 3705857536
+update_field emitterdata emcar_backfire_smoke_soft_v6_1 Color2 3992122652
+update_field emitterdata emcar_backfire_smoke_soft_v6_1 Color3 3857378576
+update_field emitterdata emcar_backfire_smoke_soft_v6_1 Color4 3588088064
+update_field emitterdata emcar_backfire_smoke_soft_v6_1 Size X 0.336
+update_field emitterdata emcar_backfire_smoke_soft_v6_1 Size Y 0.54
+update_field emitterdata emcar_backfire_smoke_soft_v6_1 Size Z 0.90
+update_field emitterdata emcar_backfire_smoke_soft_v6_1 Size W 1.26
 
-update_field emitterdata emcar_backfire_smoke_soft_v5_2 Life 0.5625
-update_field emitterdata emcar_backfire_smoke_soft_v5_2 LifeVariance 0.0625
-update_field emitterdata emcar_backfire_smoke_soft_v5_2 NumParticles 16
-update_field emitterdata emcar_backfire_smoke_soft_v5_2 MotionInherit 0.90
-update_field emitterdata emcar_backfire_smoke_soft_v5_2 IsOneShot true
-update_field emitterdata emcar_backfire_smoke_soft_v5_2 OnCycle 0.12
-update_field emitterdata emcar_backfire_smoke_soft_v5_2 OnCycleVariance 0
-update_field emitterdata emcar_backfire_smoke_soft_v5_2 OffCycle 0
-update_field emitterdata emcar_backfire_smoke_soft_v5_2 OffCycleVariance 0
-update_field emitterdata emcar_backfire_smoke_soft_v5_2 Color1 3705857536
-update_field emitterdata emcar_backfire_smoke_soft_v5_2 Color2 3992122652
-update_field emitterdata emcar_backfire_smoke_soft_v5_2 Color3 3857378576
-update_field emitterdata emcar_backfire_smoke_soft_v5_2 Color4 3588088064
-update_field emitterdata emcar_backfire_smoke_soft_v5_2 Size X 0.336
-update_field emitterdata emcar_backfire_smoke_soft_v5_2 Size Y 0.54
-update_field emitterdata emcar_backfire_smoke_soft_v5_2 Size Z 0.90
-update_field emitterdata emcar_backfire_smoke_soft_v5_2 Size W 1.26
+update_field emitterdata emcar_backfire_smoke_soft_v6_2 Life 0.5625
+update_field emitterdata emcar_backfire_smoke_soft_v6_2 LifeVariance 0.0625
+update_field emitterdata emcar_backfire_smoke_soft_v6_2 NumParticles 19
+update_field emitterdata emcar_backfire_smoke_soft_v6_2 MotionInherit 0.90
+update_field emitterdata emcar_backfire_smoke_soft_v6_2 IsOneShot true
+update_field emitterdata emcar_backfire_smoke_soft_v6_2 OnCycle 0.12
+update_field emitterdata emcar_backfire_smoke_soft_v6_2 OnCycleVariance 0
+update_field emitterdata emcar_backfire_smoke_soft_v6_2 OffCycle 0
+update_field emitterdata emcar_backfire_smoke_soft_v6_2 OffCycleVariance 0
+update_field emitterdata emcar_backfire_smoke_soft_v6_2 Color1 3705857536
+update_field emitterdata emcar_backfire_smoke_soft_v6_2 Color2 3992122652
+update_field emitterdata emcar_backfire_smoke_soft_v6_2 Color3 3857378576
+update_field emitterdata emcar_backfire_smoke_soft_v6_2 Color4 3588088064
+update_field emitterdata emcar_backfire_smoke_soft_v6_2 Size X 0.336
+update_field emitterdata emcar_backfire_smoke_soft_v6_2 Size Y 0.54
+update_field emitterdata emcar_backfire_smoke_soft_v6_2 Size Z 0.90
+update_field emitterdata emcar_backfire_smoke_soft_v6_2 Size W 1.26
 
-copy_node emittergroup fxcar_exhaust_bmw car fxcar_backfire_smoke_soft_v5
-update_field emittergroup fxcar_backfire_smoke_soft_v5 Emitters[0] Class emitterdata
-update_field emittergroup fxcar_backfire_smoke_soft_v5 Emitters[0] Collection emcar_backfire_smoke_soft_v5_1
-update_field emittergroup fxcar_backfire_smoke_soft_v5 Emitters[1] Class emitterdata
-update_field emittergroup fxcar_backfire_smoke_soft_v5 Emitters[1] Collection emcar_backfire_smoke_soft_v5_2
+copy_node emittergroup fxcar_exhaust_bmw car fxcar_backfire_smoke_soft_v6
+update_field emittergroup fxcar_backfire_smoke_soft_v6 Emitters[0] Class emitterdata
+update_field emittergroup fxcar_backfire_smoke_soft_v6 Emitters[0] Collection emcar_backfire_smoke_soft_v6_1
+update_field emittergroup fxcar_backfire_smoke_soft_v6 Emitters[1] Class emitterdata
+update_field emittergroup fxcar_backfire_smoke_soft_v6 Emitters[1] Collection emcar_backfire_smoke_soft_v6_2

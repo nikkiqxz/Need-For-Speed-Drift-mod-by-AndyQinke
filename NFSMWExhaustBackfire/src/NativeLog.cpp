@@ -24,7 +24,7 @@ bool open(const char* path) noexcept {
         g_lockReady = false;
         return false;
     }
-    write("NFSMW Exhaust Backfire native adapter v1.1.48");
+    write("NFSMW Exhaust Backfire native adapter v1.1.49");
     return true;
 }
 
