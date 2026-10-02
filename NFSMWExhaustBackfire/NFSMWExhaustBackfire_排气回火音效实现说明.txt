@@ -1,7 +1,7 @@
 NFSMW Exhaust Backfire 排气回火音效实现说明
 ================================================
 
-适用版本：v1.1.46
+适用版本：v1.1.47
 游戏：Need for Speed: Most Wanted (2005)
 生成日期：2026-09-30
 
@@ -403,6 +403,16 @@ IsOneShot=true、OnCycle=0.05 秒、OnCycleVariance=0、OffCycle=0，并把粒�
 fxcar_backfire_smoke_soft_v3（哈希 0x000D5FB6）。插件只调用 V3；V1/V2 可以
 留在数据库中但不会再触发。仅替换 ASI 不会把这些 VLT 节点写入 attributes.bin，
 更新时必须重新导入本版 NFSMWExhaustBackfire-Smoke.nfsms 并保存数据库。
+
+v1.1.47 修复 V3 完全不显示尾气的问题。NumParticles 在该粒子链路中表示发射率，
+不是一次触发最终生成的固定粒子总数；V3 的 2 粒子/秒乘以 0.05 秒窗口低于一个
+粒子，因此可能被引擎舍入为零。V4 改为每个 emitter 16 粒子/秒、OnCycle=0.12
+秒，等效每层约 1.92 个粒子，两层合计约 4 个。Life 仍为 0.45±0.05 秒，最大
+存活时间连同发射窗口约 0.62 秒，不会恢复 3-5 秒的长烟尾。
+
+V4 节点为 emcar_backfire_smoke_soft_v4_1、emcar_backfire_smoke_soft_v4_2 和
+fxcar_backfire_smoke_soft_v4（哈希 0xBA35EE7E）。插件只调用 V4，更新时必须
+再次导入随包 NFSMS；已经存在的 V1/V2/V3 节点不会被调用。
 
 
 十一、相关实现文件
