@@ -1,0 +1,16 @@
+# NFSMW Exhaust Backfire v1.1.55 NOS flame shape V1.
+# Import once with NFS-VltEd after opening the Need for Speed Most Wanted game directory.
+# This intentionally changes the stock NOS flame and glow particle shape to match the
+# dedicated backfire flame. NOS life, color, timing, and trigger logic stay stock.
+
+update_field emitterdata emcar_nos_fire Size X 0.245
+update_field emitterdata emcar_nos_fire Size Y 0.315
+update_field emitterdata emcar_nos_fire Size Z 0.070
+update_field emitterdata emcar_nos_fire Size W 0
+update_field emitterdata emcar_nos_fire Speed 9
+
+update_field emitterdata emcar_nos_glow Size X 0.245
+update_field emitterdata emcar_nos_glow Size Y 0.315
+update_field emitterdata emcar_nos_glow Size Z 0.070
+update_field emitterdata emcar_nos_glow Size W 0
+update_field emitterdata emcar_nos_glow Speed 9

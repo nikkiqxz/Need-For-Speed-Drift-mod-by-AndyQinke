@@ -1,7 +1,7 @@
 NFSMW Exhaust Backfire 排气回火音效实现说明
 ================================================
 
-适用版本：v1.1.54
+适用版本：v1.1.55
 游戏：Need for Speed: Most Wanted (2005)
 生成日期：2026-09-30
 
@@ -452,6 +452,12 @@ Speed 从 6 提高到 9，在 Life、LifeVariance、Drag 和颜色不变的前�
 喷射距离提高 50%。插件只把回火火焰请求送给这个专用组，真正 NOS 仍使用原版
 fxcar_nos，外观不受影响。安装 v1.1.54 时必须额外导入这份 FlameShape NFSMS。
 
+v1.1.55 新增 NFSMWExhaustBackfire-NOSFlameShape.nfsms。该脚本按需求直接把
+原版 emcar_nos_fire 与 emcar_nos_glow 的四阶段 Size 写为
+0.245/0.315/0.070/0，使 NOS 火焰的可见宽度和高度与最新回火火焰一致。
+同时把两个节点的 Speed 从 6 写为 9，使 NOS 火焰长度也提高 50%。它不修改
+Life、颜色、时序、emittergroup 或 NOS 触发逻辑。重复导入得到相同结果。
+
 v1.1.51 针对多排气节点同步触发时的单帧峰值做性能优化。游戏主线程不再直接
 等待 PCM 回调持有的软件 voice 锁，而是把最多 64 个轻量播放请求写入独立固定
 队列；PCM 回调在下一批游戏音频缓冲开始时一次接管这些请求。暂停、弹窗、切换
@@ -496,3 +502,4 @@ WAV 加载、软件 voice、声像、低通、反射和 PCM 混音：src/NativeA
 16 份音效映射：config/BackfireAudio.ini
 专用浅色尾气数据库脚本：NFSMWExhaustBackfire-Smoke.nfsms
 专用回火火焰形状脚本：NFSMWExhaustBackfire-FlameShape.nfsms
+原版 NOS 火焰尺寸同步脚本：NFSMWExhaustBackfire-NOSFlameShape.nfsms

@@ -432,6 +432,13 @@ and raises Speed from 6 to 9. The resulting flame is 30 percent narrower and
 shorter in cross-section while traveling 50 percent farther. The stock NOS
 emitter group remains untouched.
 
+Release 1.1.55 adds the separate, opt-in
+`NFSMWExhaustBackfire-NOSFlameShape.nfsms`. It updates only the four Size keys
+of the stock `emcar_nos_fire` and `emcar_nos_glow` records to
+`0.245/0.315/0.070/0` and raises their Speed from 6 to 9, matching the complete
+dedicated backfire shape. It does not change NOS Life, colors, timing,
+emitter-group membership, or game trigger logic.
+
 After one continuous second at the limiter, each sustained attempt has a fixed
 40% probability, raised to 70% in neutral with at least 25% throttle.
 
