@@ -133,8 +133,9 @@ exhaust list. It links each live vehicle through `IRenderable + 0x38`, supplies
 the confirmed left/right markers to the timing core. Version 0.3.3 first used
 the per-vehicle one-shot effect from attribute `0xB699B7BE`; runtime proved
 that call returned successfully but produced no visible flame. Version 0.4.0
-instead reads the continuous backfire key from attribute `0x60CEC115` and
-drives selected exhaust emitters using the same parameter
+instead verifies the continuous backfire key from attribute `0x60CEC115` and
+drives selected exhaust emitters with the dedicated NFSMS-installed
+`fxcar_backfire_flame_slim_v1` key (`0x92C75354`) using the same parameter
    observed in the stock update path (`0x3C088889`). Release 1.1.28 renders paired
    WAVs through a 32-slot software voice pool into the game's active PCM renderer
    at `0x0082049E`; it no longer creates an XAudio2 device. Stock exhaust backfire is suppressed
@@ -221,7 +222,8 @@ void __thiscall EmitOneShot(
 
 Version 1.1.26 keeps the one-shot hook only for stock suppression and
 diagnostics. Plugin flames use the proven continuous emitter entry at
-`0x00744A50`, with the effect key read from attribute `0x60CEC115`, parent
+`0x00744A50`, with the dedicated effect key `0x92C75354` after validating that
+attribute `0x60CEC115` resolves for the vehicle, parent
 matrix at `CarRenderConn + 0x330`, parameter bits `0x3C088889`, intensity
 `1.0f`, and velocity pointer from `CarRenderConn + 0x38`. Release 1.1.31 first
 validates and arms the emitter, starts the corresponding audio immediately,
@@ -422,6 +424,13 @@ two outlets per frame; cars with four or more mapped outlets start at most one
 outlet per frame. This spreads emitter and one-shot smoke setup cost without
 changing the requested order, and every outlet receives its full 770 ms visual
 lifetime from its actual start frame.
+
+Release 1.1.54 separates the exhaust flame shape from the stock NOS records.
+`NFSMWExhaustBackfire-FlameShape.nfsms` copies `emcar_nos_fire` and
+`emcar_nos_glow` into dedicated records, scales every Size key to 70 percent,
+and raises Speed from 6 to 9. The resulting flame is 30 percent narrower and
+shorter in cross-section while traveling 50 percent farther. The stock NOS
+emitter group remains untouched.
 
 After one continuous second at the limiter, each sustained attempt has a fixed
 40% probability, raised to 70% in neutral with at least 25% throttle.

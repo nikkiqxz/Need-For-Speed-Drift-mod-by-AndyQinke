@@ -1,0 +1,25 @@
+# NFSMW Exhaust Backfire v1.1.54 dedicated flame shape V1.
+# Import once with NFS-VltEd after opening the Need for Speed Most Wanted game directory.
+# The stock fxcar_nos/emcar_nos_* records are not modified, so the real NOS flame stays stock.
+# Particle cross-section is 70% of stock and forward speed is 150% of stock.
+
+copy_node emitterdata emcar_nos_fire default emcar_backfire_flame_slim_v1
+copy_node emitterdata emcar_nos_glow default emcar_backfire_glow_slim_v1
+
+update_field emitterdata emcar_backfire_flame_slim_v1 Size X 0.245
+update_field emitterdata emcar_backfire_flame_slim_v1 Size Y 0.315
+update_field emitterdata emcar_backfire_flame_slim_v1 Size Z 0.070
+update_field emitterdata emcar_backfire_flame_slim_v1 Size W 0
+update_field emitterdata emcar_backfire_flame_slim_v1 Speed 9
+
+update_field emitterdata emcar_backfire_glow_slim_v1 Size X 0.245
+update_field emitterdata emcar_backfire_glow_slim_v1 Size Y 0.315
+update_field emitterdata emcar_backfire_glow_slim_v1 Size Z 0.070
+update_field emitterdata emcar_backfire_glow_slim_v1 Size W 0
+update_field emitterdata emcar_backfire_glow_slim_v1 Speed 9
+
+copy_node emittergroup fxcar_nos car fxcar_backfire_flame_slim_v1
+update_field emittergroup fxcar_backfire_flame_slim_v1 Emitters[0] Class emitterdata
+update_field emittergroup fxcar_backfire_flame_slim_v1 Emitters[0] Collection emcar_backfire_flame_slim_v1
+update_field emittergroup fxcar_backfire_flame_slim_v1 Emitters[1] Class emitterdata
+update_field emittergroup fxcar_backfire_flame_slim_v1 Emitters[1] Collection emcar_backfire_glow_slim_v1

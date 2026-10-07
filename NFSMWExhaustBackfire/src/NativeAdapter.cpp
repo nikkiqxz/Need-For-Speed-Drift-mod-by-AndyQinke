@@ -58,6 +58,8 @@ constexpr std::uintptr_t kGetPositionMarker = 0x005016D0u;
 constexpr std::uint32_t kLeftExhaustHash = 0xBCF8A18Bu;
 constexpr std::uint32_t kRightExhaustHash = 0xBD7CF15Eu;
 constexpr std::uint32_t kContinuousBackfireEffectAttributeHash = 0x60CEC115u;
+// bStringHash("fxcar_backfire_flame_slim_v1"), installed by the bundled NFSMS.
+constexpr std::uint32_t kPluginFlameEffectKey = 0x92C75354u;
 // bStringHash("fxcar_backfire_smoke_soft_v7"), installed by the bundled NFSMS.
 constexpr std::uint32_t kPluginSmokeEffectKey = 0xDC1A91D9u;
 constexpr std::uint32_t kEmitterTimeStepBits = 0x3C088889u;
@@ -1366,7 +1368,7 @@ int NFSW_EXHAUST_CALL spawnFlame(void*,
     }
     if (connection == nullptr) return 0;
 
-    std::uint32_t effectKey = 0;
+    std::uint32_t stockEffectKey = 0;
     const std::uint32_t oneShotEffectKey =
         g_exhaustSmokeEnabled && g_exhaustSmokeIntensity > 0.0f
             ? kPluginSmokeEffectKey
@@ -1376,13 +1378,14 @@ int NFSW_EXHAUST_CALL spawnFlame(void*,
         reinterpret_cast<std::uintptr_t>(connection->connection) + 0x330u);
     if (!readAttributeValue(connection->connection,
                             kContinuousBackfireEffectAttributeHash,
-                            &effectKey) ||
+                            &stockEffectKey) ||
         !readValue(connection->connection, 0x38u, &velocity) ||
         !isReadable(parentMatrix, sizeof(float) * 16u)) {
         write("LIVE_FLAME_REJECT vehicle=%u reason=unresolved_context",
               request->vehicleId);
         return 0;
     }
+    const std::uint32_t effectKey = kPluginFlameEffectKey;
     std::array<std::size_t, kMaxExhaustMarkers> left{};
     std::array<std::size_t, kMaxExhaustMarkers> right{};
     const std::size_t leftCount =

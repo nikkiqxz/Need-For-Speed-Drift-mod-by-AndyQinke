@@ -1,7 +1,7 @@
 NFSMW Exhaust Backfire 排气回火音效实现说明
 ================================================
 
-适用版本：v1.1.53
+适用版本：v1.1.54
 游戏：Need for Speed: Most Wanted (2005)
 生成日期：2026-09-30
 
@@ -442,6 +442,16 @@ V7 节点为 emcar_backfire_smoke_soft_v7_1、emcar_backfire_smoke_soft_v7_2 和
 fxcar_backfire_smoke_soft_v7（哈希 0xDC1A91D9）。插件只调用 V7，更新时必须
 再次导入随包 NFSMS；已经存在的 V1-V6 节点不会被调用。
 
+v1.1.54 将排气回火主火焰与原版 NOS 数据彻底隔离。新增的
+NFSMWExhaustBackfire-FlameShape.nfsms 从 emcar_nos_fire 和 emcar_nos_glow
+复制两个专用节点，但不修改原节点；新 emittergroup 为
+fxcar_backfire_flame_slim_v1（哈希 0x92C75354）。Size 是粒子生命周期四阶段的
+统一截面尺寸，并不是三维 XYZ 轴，因此四个阶段分别从 0.35/0.45/0.10/0
+乘以 0.70，得到 0.245/0.315/0.070/0，使火焰可见宽度和高度同时缩小 30%。
+Speed 从 6 提高到 9，在 Life、LifeVariance、Drag 和颜色不变的前提下将前向
+喷射距离提高 50%。插件只把回火火焰请求送给这个专用组，真正 NOS 仍使用原版
+fxcar_nos，外观不受影响。安装 v1.1.54 时必须额外导入这份 FlameShape NFSMS。
+
 v1.1.51 针对多排气节点同步触发时的单帧峰值做性能优化。游戏主线程不再直接
 等待 PCM 回调持有的软件 voice 锁，而是把最多 64 个轻量播放请求写入独立固定
 队列；PCM 回调在下一批游戏音频缓冲开始时一次接管这些请求。暂停、弹窗、切换
@@ -485,3 +495,4 @@ WAV 加载、软件 voice、声像、低通、反射和 PCM 混音：src/NativeA
 主配置：config/NFSMWExhaustBackfire.ini
 16 份音效映射：config/BackfireAudio.ini
 专用浅色尾气数据库脚本：NFSMWExhaustBackfire-Smoke.nfsms
+专用回火火焰形状脚本：NFSMWExhaustBackfire-FlameShape.nfsms

@@ -41,7 +41,7 @@ __declspec(dllexport) const char* BepInExNativePlugin_GUID =
     "nfsmw.exhaust.backfire.reforged";
 __declspec(dllexport) const char* BepInExNativePlugin_Name =
     "NFSMW Exhaust Backfire";
-__declspec(dllexport) const char* BepInExNativePlugin_Version = "1.1.53";
+__declspec(dllexport) const char* BepInExNativePlugin_Version = "1.1.54";
 
 #ifdef __cplusplus
 }

@@ -1,7 +1,7 @@
 # NFSMW Exhaust Backfire
 
 《Need for Speed: Most Wanted》(2005) 排气回火增强插件，当前版本为
-`1.1.53` 正式版。
+`1.1.54` 正式版。
 
 ## 当前已经完成
 
@@ -207,6 +207,11 @@
   节点统一只由逐帧服务启动；少于 4 个节点的车辆每帧最多启动 2 个，4 个及
   以上节点的车辆由每帧最多 2 个收紧为最多 1 个。每个节点仍从实际启动时获得
   完整 770 ms 生命周期，触发概率、左右顺序、300 ms 节奏、音频和烟雾参数均不变。
+- v1.1.54 新增独立的 `NFSMWExhaustBackfire-FlameShape.nfsms`。回火不再直接
+  使用原版 `fxcar_nos`，而是使用专用 `fxcar_backfire_flame_slim_v1`：火焰
+  粒子四阶段尺寸统一缩小 30% 至 `0.245/0.315/0.070/0`，前向速度从 `6`
+  提高到 `9`，使宽度和高度缩小 30%、喷射长度提高 50%。原版 NOS emitter、
+  真正的 NOS 尾焰、持续时间、颜色、触发逻辑、SunSet 灯光和尾气烟雾均不改变。
 - 默认要求左右两个 marker 都存在。任意一个缺失时，该车不会发出排气火焰
   或回火声音；没有任何排气节点的电动车同样会被控制器和原生回调双重拦截。
 - 已接管原版排气回火事件 `0/3/4`，仅在车辆左右排气节点都有效时抑制。
@@ -272,9 +277,10 @@ PE 字段和自身所需入口代码签名，全部通过才注册核心并安�
 ## 安装与测试
 
 1. 确保游戏完全退出。
-2. 用 NFS-VltEd 打开游戏根目录，导入包内顶层的
-   `NFSMWExhaustBackfire-Smoke.nfsms`，确认脚本命令全部成功后保存数据库。
-   这一步只新增两个 emitter 和一个 emittergroup，不会改写原版排气效果。
+2. 用 NFS-VltEd 打开游戏根目录，依次导入包内顶层的
+   `NFSMWExhaustBackfire-Smoke.nfsms` 和
+   `NFSMWExhaustBackfire-FlameShape.nfsms`，确认两份脚本命令全部成功后保存
+   数据库。两份脚本只新增专用节点，不会改写原版排气或 NOS 效果。
 3. 把 `NFSMW.CGPhysicsFix.asi`、`NFSMWExhaustBackfire.asi`、`NFSMWExhaustBackfire.ini`、
    `BackfireAudio.ini` 和 `audio/backfire` 文件夹放进游戏的 `SCRIPTS` 目录。
 4. 启动 `speed.exe`。由 `NFSMW.CGPhysicsFix.asi` 完成程序和设备验证，并在首次
