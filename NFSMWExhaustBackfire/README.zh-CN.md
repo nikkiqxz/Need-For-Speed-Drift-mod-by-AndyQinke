@@ -1,7 +1,7 @@
 # NFSMW Exhaust Backfire
 
 《Need for Speed: Most Wanted》(2005) 排气回火增强插件，当前版本为
-`1.1.51` 正式版。
+`1.1.52` 正式版。
 
 ## 当前已经完成
 
@@ -197,6 +197,12 @@
   同一时刻到期的火焰/烟雾节点每帧最多启动 2 个，把 4-6 节点车辆的粒子创建
   峰值分摊到相邻帧；0.3 秒节点节奏和每个节点 770 ms 的实际持续时间保持不变。
   触发概率、音频数量、16 选 1 随机、音量、音色、混响及 V7 烟雾参数均未改变。
+- v1.1.52 移除尾焰插件自己的程序签章、硬件采集和设备 JSON 创建逻辑，改为
+  消费唯一共享验证权威 `NFSMW.CGPhysicsFix.asi`。启动时要求该模块已经加载并
+  导出 ABI v1 的 `Verified` 状态，再独立核对权威 ASI 的磁盘 SHA-256、共享
+  `SCRIPTS/NFSMW.CGPhysicsFix.device.json` 的规范路径、严格 JSON、DPAPI 载荷和
+  全部固定字段。模块缺失、仍在验证、验证失败、ABI 不兼容、路径逃逸、JSON
+  损坏、DPAPI 失败或三方权威哈希不一致时均不安装 Hook，且绝不回退旧验证器。
 - 默认要求左右两个 marker 都存在。任意一个缺失时，该车不会发出排气火焰
   或回火声音；没有任何排气节点的电动车同样会被控制器和原生回调双重拦截。
 - 已接管原版排气回火事件 `0/3/4`，仅在车辆左右排气节点都有效时抑制。
@@ -222,24 +228,20 @@
   游戏完整保留原版回火逻辑，不会进入“有火无声”的半工作状态。
 - 快速连续换档会追加尚未完成的成对事件；配置重载、控制器重置和显式关闭时会恢复
   仍存活车辆的原版排气回火开关。车辆消失后不会用过期 ID 回调适配层。
-- v1.1.14 增加独立设备绑定门禁。插件在安装任何 Hook 前读取 SMBIOS System
-  UUID、Windows `MachineGuid` 和系统卷序列号，三项缺一即拒绝。首次验证成功会在
-  游戏现有的 `SCRIPTS`/`scripts` 目录生成
-  `NFSMWExhaustBackfire.device.json`；确定性绑定载荷使用 Windows DPAPI
-  `LOCAL_MACHINE` 模式和插件独立熵加密，JSON 只保存大写十六进制密文，不落盘
-  原始硬件值。后续启动会解密并核对现有绑定；文件损坏、被篡改、来自另一台设备
-  或产品载荷不匹配时均停用插件，且不会覆盖原文件。
+- v1.1.14 曾使用尾焰插件独立设备绑定；该实现已在 v1.1.52 完整删除。旧文件
+  `SCRIPTS/NFSMWExhaustBackfire.device.json` 不再读取，也不会被插件迁移或删除，
+  可在游戏退出后由用户手动清理。
 
 ## 当前状态
 
 这个包已经包含完整、可测试的触发状态机、配置读取、16 槽音频清单和稳定的
 C 回调接口。ABI v8 保留左右排气节点数量并移除不再使用的氮气状态字段；
 车辆快照大小为 132 字节，音频继续使用扁平 `clipIndex` 和固定 packing。目标游戏已锁定为
-精确的 C5C5/Reforged 镜像，并只接受 `speed.exe`。插件会在安装任何 Hook 前
-核验完整 MD5/SHA-256、64 字节 `NFSMWRF1` 签章、验证码 `868086`、签章记录的
-原始规范 SHA-256、PE 字段和每个入口的代码签名。普通原版、仅改名或被修改的
-`speed.exe` 都不会被接受。上述程序验证和设备绑定验证全部通过后才会注册核心并
-安装 Hook。
+精确的 C5C5/Reforged 镜像，并只接受共享权威已经验证的 `speed.exe`。四个相关
+ASI 共用 `NFSMW.CGPhysicsFix.asi` 作为唯一验证权威，并只生成、读取一份
+`SCRIPTS/NFSMW.CGPhysicsFix.device.json`。尾焰插件不再散列 `speed.exe`、采集
+硬件标识或生成产品专用 JSON；共享状态与绑定复核通过后，它仍会检查当前进程的
+PE 字段和自身所需入口代码签名，全部通过才注册核心并安装 Hook。
 
 现在已有可直接由 ASI Loader 加载的 Win32/x86 正式版。原生 ASI 只读取车辆表
 0 号槽中的玩家车，并只接受该表项
@@ -269,11 +271,12 @@ C 回调接口。ABI v8 保留左右排气节点数量并移除不再使用的�
 2. 用 NFS-VltEd 打开游戏根目录，导入包内顶层的
    `NFSMWExhaustBackfire-Smoke.nfsms`，确认脚本命令全部成功后保存数据库。
    这一步只新增两个 emitter 和一个 emittergroup，不会改写原版排气效果。
-3. 把 `NFSMWExhaustBackfire.asi`、`NFSMWExhaustBackfire.ini`、
+3. 把 `NFSMW.CGPhysicsFix.asi`、`NFSMWExhaustBackfire.asi`、`NFSMWExhaustBackfire.ini`、
    `BackfireAudio.ini` 和 `audio/backfire` 文件夹放进游戏的 `SCRIPTS` 目录。
-4. 启动已经签章并包含验证码 `868086` 的 `speed.exe`。首次成功启动后确认
-   `SCRIPTS/NFSMWExhaustBackfire.device.json` 已生成；这个 JSON 不随压缩包预置。
-5. 再次启动游戏，确认插件能够核验并复用同一 JSON，然后进入一场可驾驶赛事。
+4. 启动 `speed.exe`。由 `NFSMW.CGPhysicsFix.asi` 完成程序和设备验证，并在首次
+   成功时生成唯一共享文件 `SCRIPTS/NFSMW.CGPhysicsFix.device.json`；这个 JSON
+   不随压缩包预置。
+5. 再次启动游戏，确认共享权威能够核验并复用同一 JSON，然后进入一场可驾驶赛事。
 6. 正常驾驶一段，完成数次升/降档，并持续顶住红线约 3 秒。
 7. 确认能看见同步或间隔 300 ms 的左右尾焰、短促稀薄的浅灰白尾气，并检查
    声音是否随车辆位置变化。
@@ -281,7 +284,7 @@ C 回调接口。ABI v8 保留左右排气节点数量并移除不再使用的�
    尾焰脉冲，并确认修改 `SpotLights.yml` 的 `ExhaustLight` 后两者颜色一致。
 
 正式构建默认关闭全部文件日志与调试输出，不会创建或刷新
-`NFSMWExhaustBackfire.log`。签章、PE、代码入口或设备绑定任意一项不匹配时，
+`NFSMWExhaustBackfire.log`。共享权威、共享绑定、PE 或代码入口任意一项不匹配时，
 插件会保持禁用且不安装 Hook，游戏继续使用原逻辑。
 不要在游戏运行中热卸载或替换 ASI；安装、更新和移除都必须在游戏完全退出后
 进行。常规 ASI Loader 会让插件随游戏进程保持加载，这也是当前支持的运行方式。
@@ -347,7 +350,7 @@ ctest --test-dir build --output-on-failure
 最终 ASI 必须构建为 Win32/x86；64 位 DLL 无法被 NFSMW 2005 加载。
 
 当前 Win32 Release 构建会运行核心状态机、C 回调流程、纯 C 头文件兼容性和
-签章验证测试；产物也必须核对为 x86/PE32。
+共享验证权威消费者测试；产物也必须核对为 x86/PE32。
 
 换档同步模式允许左右在同一帧各提交一发；顺序模式随机决定先后侧，并把第二侧
 安排在 300 ms 后。若游戏后端拒绝请求，会在该成对事件截止前重试；截止后直接

@@ -1,7 +1,7 @@
 NFSMW Exhaust Backfire 排气回火音效实现说明
 ================================================
 
-适用版本：v1.1.51
+适用版本：v1.1.52
 游戏：Need for Speed: Most Wanted (2005)
 生成日期：2026-09-30
 
@@ -455,6 +455,22 @@ v1.1.51 针对多排气节点同步触发时的单帧峰值做性能优化。游
 因此 4-6 排气节点车辆的第二波粒子创建会分摊到相邻帧，而不是集中在单帧。
 每个节点从实际启动时重新计算 770 ms 结束时间，原有 0.3 秒主节奏、触发概率、
 节点选择、音频数量、随机素材、音量、音色、混响和 V7 烟雾参数均保持不变。
+
+v1.1.52 将启动验证改为共享权威模式。尾焰插件不再读取或散列 speed.exe，
+不再读取 SMBIOS、MachineGuid 或系统卷序列号，也不再创建、迁移或读取
+NFSMWExhaustBackfire.device.json。它只消费已经加载的 NFSMW.CGPhysicsFix.asi：
+
+- 要求导出 GetNFSMWValidationStatusV1 的 ABI v1 状态为 Verified；
+- 要求 bindingSchema=1、identity source mask=7、failureReason 为空；
+- 重新计算已加载权威 ASI 的磁盘 SHA-256；
+- 只接受同一游戏 SCRIPTS 目录下的 NFSMW.CGPhysicsFix.device.json；
+- 严格解析外层 JSON，以固定 entropy 通过 Windows DPAPI 解密；
+- 逐字段核对产品、权威模块、权威哈希、程序哈希、规范哈希、验证码、设备来源
+  掩码和硬件 ID；导出状态、磁盘 ASI、解密载荷中的权威哈希必须三方一致。
+
+任一环节失败都会在安装 Hook 前关闭尾焰插件，不会加载第二份权威模块，也不会
+回退旧独立验证。四个相关 ASI 只共用这一份验证权威和共享 JSON。旧的
+NFSMWExhaustBackfire.device.json 已无用途，可在游戏退出后手动删除。
 
 
 十一、相关实现文件

@@ -437,25 +437,21 @@ bool hasBytes(std::uintptr_t address,
            actual == expected;
 }
 
-bool verifyHost(wchar_t path[MAX_PATH]) noexcept {
+bool verifyHost() noexcept {
+    char reason[256] = {};
+    if (!nfsmw_exhaust::startup_gate::VerifyLoadedAuthority(
+            reason, sizeof(reason))) {
+        write("GATE_REJECT shared authority: %s",
+              reason[0] == '\0' ? "validation failed" : reason);
+        return false;
+    }
+
     HMODULE host = GetModuleHandleA(nullptr);
     if (host == nullptr || reinterpret_cast<std::uintptr_t>(host) != kImageBase) {
         write("GATE_REJECT loaded image base is not 0x%08X",
               static_cast<unsigned>(kImageBase));
         return false;
     }
-    const DWORD pathSize = GetModuleFileNameW(nullptr, path, MAX_PATH);
-    if (pathSize == 0 || pathSize >= MAX_PATH) {
-        write("GATE_REJECT could not resolve main executable path");
-        return false;
-    }
-    char reason[192] = {};
-    if (!nfsmw_exhaust::startup_gate::ValidateExecutable(
-            path, reason, sizeof(reason))) {
-        write("GATE_REJECT %s", reason[0] == '\0' ? "validation failed" : reason);
-        return false;
-    }
-
     IMAGE_DOS_HEADER dos{};
     IMAGE_NT_HEADERS32 nt{};
     if (!safeRead(host, &dos, sizeof(dos)) ||
@@ -504,24 +500,10 @@ bool verifyHost(wchar_t path[MAX_PATH]) noexcept {
         write("GATE_REJECT one or more required code signatures changed");
         return false;
     }
-    nfsmw_exhaust::startup_gate::BindingResult binding{};
-    if (!nfsmw_exhaust::startup_gate::EnsureCurrentDeviceBinding(
-            path, &binding, reason, sizeof(reason))) {
-        write("GATE_REJECT device binding: %s",
-              reason[0] == '\0' ? "validation failed" : reason);
-        return false;
-    }
-    write("GATE_ACCEPT path='%ls' verificationCode=%u sha256=%s "
-          "deviceBinding=%s sourceMask=0x%X",
-          path,
+    write("GATE_ACCEPT authority=NFSMW.CGPhysicsFix.asi "
+          "binding=NFSMW.CGPhysicsFix.device.json sourceMask=0x%X",
           static_cast<unsigned>(
-              nfsmw_exhaust::startup_gate::kVerificationCode),
-          nfsmw_exhaust::startup_gate::kStampedExecutableSha256,
-          binding.status ==
-                  nfsmw_exhaust::startup_gate::BindingStatus::Created
-              ? "created"
-              : "verified",
-          binding.sourceMask);
+              nfsmw_exhaust::startup_gate::kRequiredSourceMask));
     return true;
 }
 
@@ -2512,8 +2494,7 @@ NFSW_Exhaust_NativeMain(HMODULE module) {
     write("INIT replacement mode: paired pulse flames and native game PCM audio; "
           "stock exhaust backfire suppressed after "
           "marker validation");
-    wchar_t executablePath[MAX_PATH] = {};
-    if (!verifyHost(executablePath)) return -1;
+    if (!verifyHost()) return -1;
     if (!registerCore()) return -1;
     // The first verified gameplay frame opens this gate. Loading directly into
     // a menu or attaching during a pause must never leave the mixer armed.
