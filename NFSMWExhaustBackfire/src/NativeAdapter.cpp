@@ -64,7 +64,9 @@ constexpr std::uint32_t kEmitterTimeStepBits = 0x3C088889u;
 constexpr std::uint64_t kPluginFlamePulseMs = 770u;
 constexpr std::uint64_t kPluginFlameAudioLeadMs = 100u;
 constexpr std::uint64_t kMultiOutletStepMs = 300u;
-constexpr unsigned kMaxOutletStartsPerFrame = 2u;
+constexpr unsigned kMaxSmallOutletStartsPerFrame = 2u;
+constexpr unsigned kMaxLargeOutletStartsPerFrame = 1u;
+constexpr std::size_t kLargeOutletCount = 4u;
 constexpr float kPluginFlameIntensity = 1.0f;
 constexpr std::uint32_t kGameFlowRacing = 6u;
 
@@ -1291,13 +1293,15 @@ void emitPendingOneShot(ConnectionRecord& connection, std::size_t index,
 
 bool armOutlet(ConnectionRecord& connection, std::size_t index,
                std::uint32_t effectKey, std::uint32_t oneShotEffectKey,
-               std::uint64_t dueMs, std::uint64_t nowMs) noexcept {
+               std::uint64_t dueMs) noexcept {
     if (index >= connection.emitterCount || effectKey == 0 ||
         !connectionOwnsEmitter(connection, index)) {
         return false;
     }
     connection.pluginPulseStartMs[index] = dueMs;
-    connection.pluginPulseUntilMs[index] = dueMs + kPluginFlamePulseMs;
+    // A zero end time marks an armed pulse that has not consumed frame budget
+    // yet. Its full lifetime begins only when the service loop starts it.
+    connection.pluginPulseUntilMs[index] = 0;
     connection.pluginPulseEffectKeys[index] = effectKey;
     connection.pluginPulseOneShotEffectKeys[index] = oneShotEffectKey;
     connection.pluginPulseLastUpdateMs[index] = 0;
@@ -1308,27 +1312,7 @@ bool armOutlet(ConnectionRecord& connection, std::size_t index,
     } else {
         connection.pluginPulseOneShotPendingMask &= ~bit;
     }
-    if (dueMs > nowMs) return true;
-
-    void* velocity = nullptr;
-    const auto* parentMatrix = reinterpret_cast<const void*>(
-        reinterpret_cast<std::uintptr_t>(connection.connection) + 0x330u);
-    if (!readValue(connection.connection, 0x38u, &velocity) ||
-        !isReadable(parentMatrix, sizeof(float) * 16u)) {
-        clearOutletPulse(connection, index);
-        return false;
-    }
-    emitPendingOneShot(connection, index, parentMatrix, velocity);
-    __try {
-        g_originalUpdateEmitter(connection.emitters[index], parentMatrix,
-                                effectKey, kEmitterTimeStepBits,
-                                kPluginFlameIntensity, velocity);
-        connection.pluginPulseLastUpdateMs[index] = nowMs;
-        return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        clearOutletPulse(connection, index);
-        return false;
-    }
+    return true;
 }
 
 MultiOutletSequence* findMultiOutletSequence(ConnectionRecord& connection,
@@ -1435,7 +1419,7 @@ int NFSW_EXHAUST_CALL spawnFlame(void*,
                 outlet = right[rightIndex++];
             }
             if (!armOutlet(*connection, outlet, effectKey, oneShotEffectKey,
-                           dueMs, nowMs)) {
+                           dueMs)) {
                 return 0;
             }
             ++armedOutlets;
@@ -1456,7 +1440,7 @@ int NFSW_EXHAUST_CALL spawnFlame(void*,
                     ? nowMs + kPluginFlameAudioLeadMs + kMultiOutletStepMs
                     : nowMs + kPluginFlameAudioLeadMs;
             if (!armOutlet(*connection, outlets[position], effectKey,
-                           oneShotEffectKey, dueMs, nowMs)) {
+                           oneShotEffectKey, dueMs)) {
                 return 0;
             }
             ++armedOutlets;
@@ -1486,13 +1470,13 @@ int NFSW_EXHAUST_CALL spawnFlame(void*,
 
 void servicePluginFlamePulses(std::uint64_t nowMs) noexcept {
     if (g_originalUpdateEmitter == nullptr) return;
-    unsigned outletStarts = 0;
     for (auto& connection : g_connections) {
         if (connection.pluginPulseMask == 0) continue;
         for (std::size_t index = 0; index < connection.emitterCount; ++index) {
             const std::uint32_t bit = 1u << index;
             if ((connection.pluginPulseMask & bit) == 0) continue;
-            if (connection.pluginPulseUntilMs[index] < nowMs) {
+            if (connection.pluginPulseLastUpdateMs[index] != 0 &&
+                connection.pluginPulseUntilMs[index] < nowMs) {
                 clearOutletPulse(connection, index);
                 continue;
             }
@@ -1514,6 +1498,11 @@ void servicePluginFlamePulses(std::uint64_t nowMs) noexcept {
             !isReadable(parentMatrix, sizeof(float) * 16u)) {
             continue;
         }
+        const unsigned maxOutletStarts =
+            connection.emitterCount >= kLargeOutletCount
+                ? kMaxLargeOutletStartsPerFrame
+                : kMaxSmallOutletStartsPerFrame;
+        unsigned outletStarts = 0;
         for (std::size_t index = 0; index < connection.emitterCount; ++index) {
             const std::uint32_t bit = 1u << index;
             if ((connection.pluginPulseMask & bit) == 0) continue;
@@ -1521,7 +1510,7 @@ void servicePluginFlamePulses(std::uint64_t nowMs) noexcept {
                 connection.pluginPulseLastUpdateMs[index] == 0;
             if (connection.pluginPulseStartMs[index] > nowMs ||
                 connection.pluginPulseLastUpdateMs[index] == nowMs ||
-                (starting && outletStarts >= kMaxOutletStartsPerFrame) ||
+                (starting && outletStarts >= maxOutletStarts) ||
                 !connectionOwnsEmitter(connection, index)) {
                 continue;
             }

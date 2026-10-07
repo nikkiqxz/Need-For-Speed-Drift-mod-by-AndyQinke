@@ -416,6 +416,13 @@ outlets on the other side follow in order. The adapter reports the true per-side
 outlet counts to the core so the audio batch can scale independently of the two
 logical flame-side requests.
 
+Starting with v1.1.53, every armed flame and smoke outlet starts exclusively
+from the frame service loop. Cars with fewer than four mapped outlets may start
+two outlets per frame; cars with four or more mapped outlets start at most one
+outlet per frame. This spreads emitter and one-shot smoke setup cost without
+changing the requested order, and every outlet receives its full 770 ms visual
+lifetime from its actual start frame.
+
 After one continuous second at the limiter, each sustained attempt has a fixed
 40% probability, raised to 70% in neutral with at least 25% throttle.
 
